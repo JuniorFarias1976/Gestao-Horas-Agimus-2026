@@ -8,8 +8,10 @@ import {
   TrendingDown, 
   DollarSign, 
   Calendar,
-  User,
-  FileDown
+  User as UserIcon,
+  FileDown,
+  LogOut,
+  Users
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -25,12 +27,15 @@ import {
   Cell
 } from 'recharts';
 
-import { TimeEntry, ExpenseEntry, AdvanceEntry, AppSettings, Tab, Period } from './types';
+import { TimeEntry, ExpenseEntry, AdvanceEntry, AppSettings, Tab, Period, User } from './types';
 import { generatePeriods, filterByPeriod, formatCurrency, calculateHoursBreakdown, formatNumber } from './utils/formatters';
+import { authService } from './services/authService';
 import { SummaryCard } from './components/SummaryCard';
 import { TimeSheet } from './components/TimeSheet';
 import { ExpenseTracker } from './components/ExpenseTracker';
 import { AiReport } from './components/AiReport';
+import { UserManagement } from './components/UserManagement';
+import { Login } from './components/Login';
 import { exportToPDF } from './services/pdfExportService';
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -45,22 +50,31 @@ const DEFAULT_SETTINGS: AppSettings = {
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1'];
 
 export default function App() {
-  // State
+  // Auth State
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  // Initialize auth
+  useEffect(() => {
+    const user = authService.getCurrentUser();
+    if (user) {
+      setCurrentUser(user);
+    }
+  }, []);
+
+  // App State
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('settings');
     const parsed = saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
-    // Ensure new fields exist for migrated data
     return { ...DEFAULT_SETTINGS, ...parsed };
   });
   
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(() => {
     const saved = localStorage.getItem('timeEntries');
     const parsed = saved ? JSON.parse(saved) : [];
-    // Migration for old entries
     return parsed.map((e: any) => ({
       ...e,
-      isHoliday: e.isHoliday || false, // Default for migration
+      isHoliday: e.isHoliday || false,
       regularHours: e.regularHours ?? Math.min(e.totalHours, 8),
       overtimeHours: e.overtimeHours ?? Math.max(0, e.totalHours - 8)
     }));
@@ -93,6 +107,14 @@ export default function App() {
   useEffect(() => localStorage.setItem('expenseEntries', JSON.stringify(expenseEntries)), [expenseEntries]);
   useEffect(() => localStorage.setItem('advances', JSON.stringify(advances)), [advances]);
 
+  // Sync Logged User Name with Settings
+  useEffect(() => {
+    if (currentUser && currentUser.name !== settings.userName) {
+      // Optional: Auto-update the "Colaborador Name" based on login
+      setSettings(prev => ({ ...prev, userName: currentUser.name }));
+    }
+  }, [currentUser]);
+
   // Derived Data
   const selectedPeriod = periods.find(p => p.id === selectedPeriodId) || periods[0];
   const filteredTime = useMemo(() => filterByPeriod(timeEntries, selectedPeriod), [timeEntries, selectedPeriod]);
@@ -105,15 +127,8 @@ export default function App() {
   const totalEarnings = filteredTime.reduce((acc, curr) => acc + curr.earnings, 0);
   const totalExpenses = filteredExpenses.reduce((acc, curr) => acc + curr.amount, 0);
   const totalAdvances = filteredAdvances.reduce((acc, curr) => acc + curr.amount, 0);
-  
-  // NEW LOGIC:
-  // Total Fund = Base Setting (Fixed)
   const totalFund = settings.expenseFund;
-  
-  // Fund Balance = Fund - Expenses
   const fundBalance = totalFund - totalExpenses;
-
-  // Net Receivable = Earnings (from extras) - Advances
   const netEarnings = totalEarnings - totalAdvances;
 
   // Chart Data Preparation
@@ -148,6 +163,16 @@ export default function App() {
   }, [filteredExpenses]);
 
   // Handlers
+  const handleLoginSuccess = (user: User) => {
+    setCurrentUser(user);
+    setActiveTab(Tab.DASHBOARD);
+  };
+
+  const handleLogout = () => {
+    authService.logout();
+    setCurrentUser(null);
+  };
+
   const handleAddTime = (entry: TimeEntry) => setTimeEntries([...timeEntries, entry]);
   const handleDeleteTime = (id: string) => setTimeEntries(timeEntries.filter(e => e.id !== id));
   
@@ -159,12 +184,8 @@ export default function App() {
 
   const updateRates = (regularRate: number, overtimeRate: number) => {
     setSettings({ ...settings, hourlyRate: regularRate, overtimeRate });
-    
-    // Recalculate earnings for ALL entries when rates change
     const updatedEntries = timeEntries.map(entry => {
       let regularHours, overtimeHours;
-      
-      // Respect Holiday Logic
       if (entry.isHoliday) {
         regularHours = 0;
         overtimeHours = entry.totalHours;
@@ -173,7 +194,6 @@ export default function App() {
         regularHours = breakdown.regularHours;
         overtimeHours = breakdown.overtimeHours;
       }
-
       return {
         ...entry,
         regularHours,
@@ -187,6 +207,11 @@ export default function App() {
   const handleExportPDF = () => {
     exportToPDF(filteredTime, filteredExpenses, filteredAdvances, selectedPeriod, settings);
   };
+
+  // --- RENDER LOGIN IF NOT AUTHENTICATED ---
+  if (!currentUser) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div className="min-h-screen flex bg-slate-50 text-slate-900">
@@ -225,57 +250,86 @@ export default function App() {
           >
             <Sparkles size={20} /> Gemini Report
           </button>
+
+          {currentUser.role === 'admin' && (
+             <button 
+               onClick={() => setActiveTab(Tab.USERS)}
+               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === Tab.USERS ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-700'}`}
+             >
+               <Users size={20} /> Base de Dados / RCM
+             </button>
+          )}
         </nav>
 
         <div className="p-4 border-t border-slate-700 space-y-4">
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1 block">Nome do Colaborador</label>
-            <div className="relative">
-               <span className="absolute left-3 top-2.5 text-slate-500">
-                 <User className="w-4 h-4" />
-               </span>
-               <input 
-                 type="text" 
-                 value={settings.userName}
-                 onChange={(e) => setSettings({ ...settings, userName: e.target.value })}
-                 className="w-full bg-slate-700 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-               />
-            </div>
+          <div className="flex items-center gap-3 mb-2 px-2">
+             <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center text-white font-bold">
+               {currentUser.name.charAt(0)}
+             </div>
+             <div className="overflow-hidden">
+               <p className="text-sm font-semibold text-white truncate">{currentUser.name}</p>
+               <p className="text-xs text-slate-400 capitalize">{currentUser.role === 'admin' ? 'Administrador' : 'Colaborador'}</p>
+             </div>
           </div>
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1 block">Valor Hora Normal (8h)</label>
-            <div className="relative">
-               <span className="absolute left-3 top-2 text-slate-500">€</span>
-               <input 
-                 type="number" 
-                 value={settings.hourlyRate}
-                 onChange={(e) => updateRates(Number(e.target.value), settings.overtimeRate)}
-                 className="w-full bg-slate-700 border border-slate-600 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-               />
+          
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors text-sm"
+          >
+            <LogOut size={16} /> Sair
+          </button>
+
+          {/* Configuration Inputs */}
+          <div className="pt-4 border-t border-slate-700 space-y-4">
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1 block">Nome do Colaborador (Relatório)</label>
+              <div className="relative">
+                 <span className="absolute left-3 top-2.5 text-slate-500">
+                   <UserIcon className="w-4 h-4" />
+                 </span>
+                 <input 
+                   type="text" 
+                   value={settings.userName}
+                   onChange={(e) => setSettings({ ...settings, userName: e.target.value })}
+                   className="w-full bg-slate-700 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                 />
+              </div>
             </div>
-          </div>
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-orange-400 mb-1 block">Valor Hora Extra</label>
-            <div className="relative">
-               <span className="absolute left-3 top-2 text-slate-500">€</span>
-               <input 
-                 type="number" 
-                 value={settings.overtimeRate}
-                 onChange={(e) => updateRates(settings.hourlyRate, Number(e.target.value))}
-                 className="w-full bg-slate-700 border border-orange-900/50 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-orange-500 outline-none"
-               />
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1 block">Valor Hora Normal (8h)</label>
+              <div className="relative">
+                 <span className="absolute left-3 top-2 text-slate-500">€</span>
+                 <input 
+                   type="number" 
+                   value={settings.hourlyRate}
+                   onChange={(e) => updateRates(Number(e.target.value), settings.overtimeRate)}
+                   className="w-full bg-slate-700 border border-slate-600 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                 />
+              </div>
             </div>
-          </div>
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-indigo-400 mb-1 block">Fundo Fixo (Base)</label>
-            <div className="relative">
-               <span className="absolute left-3 top-2 text-slate-500">€</span>
-               <input 
-                 type="number" 
-                 value={settings.expenseFund}
-                 onChange={(e) => setSettings({ ...settings, expenseFund: Number(e.target.value) })}
-                 className="w-full bg-slate-700 border border-indigo-900/50 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-               />
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-orange-400 mb-1 block">Valor Hora Extra</label>
+              <div className="relative">
+                 <span className="absolute left-3 top-2 text-slate-500">€</span>
+                 <input 
+                   type="number" 
+                   value={settings.overtimeRate}
+                   onChange={(e) => updateRates(settings.hourlyRate, Number(e.target.value))}
+                   className="w-full bg-slate-700 border border-orange-900/50 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-orange-500 outline-none"
+                 />
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-indigo-400 mb-1 block">Fundo Fixo (Base)</label>
+              <div className="relative">
+                 <span className="absolute left-3 top-2 text-slate-500">€</span>
+                 <input 
+                   type="number" 
+                   value={settings.expenseFund}
+                   onChange={(e) => setSettings({ ...settings, expenseFund: Number(e.target.value) })}
+                   className="w-full bg-slate-700 border border-indigo-900/50 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                 />
+              </div>
             </div>
           </div>
         </div>
@@ -290,6 +344,7 @@ export default function App() {
            <div className="flex gap-2">
              <button onClick={() => setActiveTab(Tab.DASHBOARD)} className="p-2 bg-slate-100 rounded-lg"><LayoutDashboard size={20}/></button>
              <button onClick={() => setActiveTab(Tab.TIMESHEET)} className="p-2 bg-slate-100 rounded-lg"><Clock size={20}/></button>
+             <button onClick={handleLogout} className="p-2 bg-slate-100 rounded-lg text-red-500"><LogOut size={20}/></button>
            </div>
         </div>
 
@@ -301,33 +356,36 @@ export default function App() {
               {activeTab === Tab.TIMESHEET && 'Controle de Horas'}
               {activeTab === Tab.EXPENSES && 'Gestão de Despesas'}
               {activeTab === Tab.AI_REPORT && 'Inteligência Financeira'}
+              {activeTab === Tab.USERS && 'Gestão de Usuários (RCM)'}
             </h2>
             <p className="text-slate-500 text-sm">Controle de {settings.userName} (8h diárias + Extras).</p>
           </div>
           
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleExportPDF}
-              className="flex items-center gap-2 bg-white text-slate-700 px-4 py-2 rounded-lg shadow-sm border border-slate-200 hover:bg-slate-50 transition-colors text-sm font-medium"
-              title="Exportar PDF"
-            >
-              <FileDown className="w-4 h-4 text-red-600" />
-              <span className="hidden md:inline">Exportar PDF</span>
-            </button>
-            
-            <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg shadow-sm border border-slate-200">
-              <Calendar className="w-4 h-4 text-slate-400" />
-              <select 
-                value={selectedPeriodId}
-                onChange={(e) => setSelectedPeriodId(e.target.value)}
-                className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer"
+          {activeTab !== Tab.USERS && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportPDF}
+                className="flex items-center gap-2 bg-white text-slate-700 px-4 py-2 rounded-lg shadow-sm border border-slate-200 hover:bg-slate-50 transition-colors text-sm font-medium"
+                title="Exportar PDF"
               >
-                {periods.map(p => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
+                <FileDown className="w-4 h-4 text-red-600" />
+                <span className="hidden md:inline">Exportar PDF</span>
+              </button>
+              
+              <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg shadow-sm border border-slate-200">
+                <Calendar className="w-4 h-4 text-slate-400" />
+                <select 
+                  value={selectedPeriodId}
+                  onChange={(e) => setSelectedPeriodId(e.target.value)}
+                  className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer"
+                >
+                  {periods.map(p => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Dashboard Content */}
@@ -475,6 +533,13 @@ export default function App() {
             />
           </div>
         )}
+
+        {activeTab === Tab.USERS && currentUser.role === 'admin' && (
+           <div className="animate-in fade-in duration-500">
+             <UserManagement />
+           </div>
+        )}
+
       </main>
     </div>
   );

@@ -52,5 +52,20 @@ export enum Tab {
   TIMESHEET = 'timesheet',
   EXPENSES = 'expenses',
   SETTINGS = 'settings',
-  AI_REPORT = 'ai_report'
+  AI_REPORT = 'ai_report',
+  USERS = 'users' // New tab for RCM
+}
+
+// --- Auth Types ---
+
+export type UserRole = 'admin' | 'user';
+
+export interface User {
+  id: string;
+  username: string;
+  password?: string; // Optional when retrieving lists to not expose it
+  name: string;
+  role: UserRole;
+  isFirstLogin: boolean;
+  isActive: boolean;
 }
