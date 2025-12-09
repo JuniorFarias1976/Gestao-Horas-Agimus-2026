@@ -67,14 +67,14 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                  <ShieldCheck className="w-8 h-8 text-orange-600" />
               </div>
               <h2 className="text-2xl font-bold text-slate-800">Troca de Senha</h2>
-              <p className="text-slate-500 mt-2 text-sm">
+              <p className="text-slate-600 mt-2 text-sm">
                 Por segurança, você deve alterar sua senha no primeiro acesso.
               </p>
            </div>
 
            <form onSubmit={handleChangePassword} className="space-y-4">
              <div>
-               <label className="block text-sm font-medium text-slate-700 mb-1">Nova Senha</label>
+               <label className="block text-sm font-bold text-slate-700 mb-1">Nova Senha</label>
                <input 
                  type="password"
                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-orange-500"
@@ -84,7 +84,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                />
              </div>
              <div>
-               <label className="block text-sm font-medium text-slate-700 mb-1">Confirmar Nova Senha</label>
+               <label className="block text-sm font-bold text-slate-700 mb-1">Confirmar Nova Senha</label>
                <input 
                  type="password"
                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-orange-500"
@@ -126,20 +126,20 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
              <Wallet className="w-8 h-8 text-blue-600" />
              <h1 className="text-2xl font-bold text-slate-800">Quinzenal<span className="text-blue-600">Pro</span></h1>
            </div>
-           <p className="text-slate-500 text-sm">Controle de Horas e Despesas</p>
+           <p className="text-slate-600 text-sm font-medium">Controle de Horas e Despesas</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-6">
            <div className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1 ml-1">Usuário</label>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1 ml-1">Usuário</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <UserIcon className="h-5 w-5 text-slate-400" />
                   </div>
                   <input
                     type="text"
-                    className="w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 transition-all"
+                    className="w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 transition-all text-slate-800 placeholder-slate-400"
                     placeholder="Seu usuário de acesso"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -149,14 +149,14 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1 ml-1">Senha</label>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1 ml-1">Senha</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <Lock className="h-5 w-5 text-slate-400" />
                   </div>
                   <input
                     type="password"
-                    className="w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 transition-all"
+                    className="w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 transition-all text-slate-800 placeholder-slate-400"
                     placeholder="Sua senha"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
