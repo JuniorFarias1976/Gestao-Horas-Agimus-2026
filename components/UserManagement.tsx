@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../types';
 import { authService } from '../services/authService';
-import { UserPlus, Trash2, RefreshCw, Users, Shield, User as UserIcon } from 'lucide-react';
+import { UserPlus, Trash2, RefreshCw, Users, Shield, User as UserIcon, CheckCircle, X } from 'lucide-react';
 
 export const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -13,6 +13,7 @@ export const UserManagement: React.FC = () => {
     role: 'user' as 'admin' | 'user'
   });
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   useEffect(() => {
     loadUsers();
@@ -20,6 +21,13 @@ export const UserManagement: React.FC = () => {
 
   const loadUsers = () => {
     setUsers(authService.getUsers());
+  };
+
+  const showSuccess = (message: string) => {
+    setSuccessMessage(message);
+    setTimeout(() => {
+      setSuccessMessage('');
+    }, 3000);
   };
 
   const handleCreate = (e: React.FormEvent) => {
@@ -35,6 +43,7 @@ export const UserManagement: React.FC = () => {
       loadUsers();
       setIsAdding(false);
       setFormData({ name: '', username: '', password: '', role: 'user' });
+      showSuccess('Usuário criado com sucesso!');
     } catch (err: any) {
       setError(err.message);
     }
@@ -45,6 +54,7 @@ export const UserManagement: React.FC = () => {
       try {
         authService.deleteUser(id);
         loadUsers();
+        showSuccess('Usuário excluído com sucesso.');
       } catch (err: any) {
         alert(err.message);
       }
@@ -54,18 +64,31 @@ export const UserManagement: React.FC = () => {
   const handleResetPassword = (id: string) => {
     if (confirm('Resetar senha para "123456" e forçar troca no próximo login?')) {
         authService.changePassword(id, '123456');
-        // Force first login flag manually in this context since changePassword usually sets it to false (normal flow)
-        // But for a reset, we want true.
         const allUsers = authService.getUsers();
         const updated = allUsers.map(u => u.id === id ? { ...u, isFirstLogin: true } : u);
         authService.saveUsers(updated);
         loadUsers();
-        alert('Senha resetada com sucesso.');
+        showSuccess('Senha resetada para "123456" com sucesso.');
     }
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in">
+    <div className="space-y-6 animate-in fade-in relative">
+      
+      {/* Toast Notification */}
+      {successMessage && (
+        <div className="fixed top-4 right-4 z-50 bg-emerald-600 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-5 duration-300">
+           <CheckCircle className="w-6 h-6" />
+           <div>
+             <h4 className="font-bold text-sm">Sucesso</h4>
+             <p className="text-xs text-emerald-100">{successMessage}</p>
+           </div>
+           <button onClick={() => setSuccessMessage('')} className="ml-2 hover:bg-emerald-700 rounded-full p-1 transition-colors">
+             <X className="w-4 h-4" />
+           </button>
+        </div>
+      )}
+
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex justify-between items-center">
         <div>
            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
