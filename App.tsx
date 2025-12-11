@@ -30,6 +30,7 @@ import {
 import { TimeEntry, ExpenseEntry, AdvanceEntry, AppSettings, Tab, Period, User } from './types';
 import { generatePeriods, filterByPeriod, formatCurrency, calculateHoursBreakdown, formatNumber } from './utils/formatters';
 import { authService } from './services/authService';
+import { FinancialRepository } from './database/repositories/FinancialRepository';
 import { SummaryCard } from './components/SummaryCard';
 import { TimeSheet } from './components/TimeSheet';
 import { ExpenseTracker } from './components/ExpenseTracker';
@@ -37,15 +38,6 @@ import { AiReport } from './components/AiReport';
 import { UserManagement } from './components/UserManagement';
 import { Login } from './components/Login';
 import { exportToPDF } from './services/pdfExportService';
-
-const DEFAULT_SETTINGS: AppSettings = {
-  hourlyRate: 0, // Default to 0 as requested (only extras are paid)
-  overtimeRate: 8, // Requested 8 euros for extra hours
-  dailyLimit: 8,
-  currency: 'EUR',
-  userName: 'Colaborador',
-  expenseFund: 0,
-};
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1'];
 
@@ -63,32 +55,12 @@ export default function App() {
 
   // App State
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
-  const [settings, setSettings] = useState<AppSettings>(() => {
-    const saved = localStorage.getItem('settings');
-    const parsed = saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...parsed };
-  });
   
-  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(() => {
-    const saved = localStorage.getItem('timeEntries');
-    const parsed = saved ? JSON.parse(saved) : [];
-    return parsed.map((e: any) => ({
-      ...e,
-      isHoliday: e.isHoliday || false,
-      regularHours: e.regularHours ?? Math.min(e.totalHours, 8),
-      overtimeHours: e.overtimeHours ?? Math.max(0, e.totalHours - 8)
-    }));
-  });
-
-  const [expenseEntries, setExpenseEntries] = useState<ExpenseEntry[]>(() => {
-    const saved = localStorage.getItem('expenseEntries');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [advances, setAdvances] = useState<AdvanceEntry[]>(() => {
-    const saved = localStorage.getItem('advances');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Load data from FinancialRepository
+  const [settings, setSettings] = useState<AppSettings>(() => FinancialRepository.getSettings());
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(() => FinancialRepository.getTimeEntries());
+  const [expenseEntries, setExpenseEntries] = useState<ExpenseEntry[]>(() => FinancialRepository.getExpenses());
+  const [advances, setAdvances] = useState<AdvanceEntry[]>(() => FinancialRepository.getAdvances());
 
   const [periods] = useState<Period[]>(generatePeriods());
   
@@ -101,11 +73,11 @@ export default function App() {
 
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>(periods[currentPeriodIndex]?.id);
 
-  // Persistence
-  useEffect(() => localStorage.setItem('settings', JSON.stringify(settings)), [settings]);
-  useEffect(() => localStorage.setItem('timeEntries', JSON.stringify(timeEntries)), [timeEntries]);
-  useEffect(() => localStorage.setItem('expenseEntries', JSON.stringify(expenseEntries)), [expenseEntries]);
-  useEffect(() => localStorage.setItem('advances', JSON.stringify(advances)), [advances]);
+  // Persistence - Save to FinancialRepository on change
+  useEffect(() => FinancialRepository.saveSettings(settings), [settings]);
+  useEffect(() => FinancialRepository.saveTimeEntries(timeEntries), [timeEntries]);
+  useEffect(() => FinancialRepository.saveExpenses(expenseEntries), [expenseEntries]);
+  useEffect(() => FinancialRepository.saveAdvances(advances), [advances]);
 
   // Sync Logged User Name with Settings
   useEffect(() => {

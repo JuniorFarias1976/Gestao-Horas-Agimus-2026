@@ -1,12 +1,10 @@
 import { User } from '../types';
-
-const USERS_KEY = 'app_users';
-const SESSION_KEY = 'app_session';
+import { UserRepository } from '../database/repositories/UserRepository';
 
 // Initialize default admin if not exists
 const initializeAuth = () => {
-  const users = localStorage.getItem(USERS_KEY);
-  if (!users) {
+  const users = UserRepository.getAll();
+  if (users.length === 0) {
     const defaultAdmin: User = {
       id: '1',
       username: 'ADM',
@@ -16,7 +14,7 @@ const initializeAuth = () => {
       isFirstLogin: true,
       isActive: true
     };
-    localStorage.setItem(USERS_KEY, JSON.stringify([defaultAdmin]));
+    UserRepository.create(defaultAdmin);
   }
 };
 
@@ -24,77 +22,69 @@ initializeAuth();
 
 export const authService = {
   getUsers: (): User[] => {
-    const users = localStorage.getItem(USERS_KEY);
-    return users ? JSON.parse(users) : [];
+    return UserRepository.getAll();
   },
 
   saveUsers: (users: User[]) => {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    UserRepository.saveAll(users);
   },
 
   login: (username: string, password: string): { success: boolean; user?: User; error?: string } => {
-    const users = authService.getUsers();
+    const users = UserRepository.getAll();
     const user = users.find(u => u.username.toUpperCase() === username.toUpperCase() && u.isActive);
 
     if (user && user.password === password) {
       const { password, ...safeUser } = user; // Remove password from session
-      localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
-      return { success: true, user: user }; // Return full user (with isFirstLogin check)
+      UserRepository.setSession(safeUser);
+      return { success: true, user: user };
     }
 
     return { success: false, error: 'Usuário ou senha inválidos.' };
   },
 
   logout: () => {
-    localStorage.removeItem(SESSION_KEY);
+    UserRepository.clearSession();
   },
 
   getCurrentUser: (): User | null => {
-    const session = localStorage.getItem(SESSION_KEY);
-    return session ? JSON.parse(session) : null;
+    return UserRepository.getSession();
   },
 
   changePassword: (userId: string, newPassword: string) => {
-    const users = authService.getUsers();
+    const users = UserRepository.getAll();
     const updatedUsers = users.map(u => {
       if (u.id === userId) {
         return { ...u, password: newPassword, isFirstLogin: false };
       }
       return u;
     });
-    authService.saveUsers(updatedUsers);
+    UserRepository.saveAll(updatedUsers);
     
     // Update session if it's the current user
-    const currentUser = authService.getCurrentUser();
+    const currentUser = UserRepository.getSession();
     if (currentUser && currentUser.id === userId) {
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ ...currentUser, isFirstLogin: false }));
+        UserRepository.setSession({ ...currentUser, isFirstLogin: false });
     }
   },
 
   createUser: (user: Omit<User, 'id'>) => {
-    const users = authService.getUsers();
+    const users = UserRepository.getAll();
     if (users.some(u => u.username.toUpperCase() === user.username.toUpperCase())) {
       throw new Error('Nome de usuário já existe.');
     }
     const newUser: User = { ...user, id: crypto.randomUUID() };
-    users.push(newUser);
-    authService.saveUsers(users);
+    UserRepository.create(newUser);
   },
 
   updateUser: (user: User) => {
-    const users = authService.getUsers();
-    const updatedUsers = users.map(u => u.id === user.id ? user : u);
-    authService.saveUsers(updatedUsers);
+    UserRepository.update(user);
   },
 
   deleteUser: (id: string) => {
-    let users = authService.getUsers();
-    // Prevent deleting the last admin
-    const userToDelete = users.find(u => u.id === id);
+    const userToDelete = UserRepository.getById(id);
     if (userToDelete?.username === 'ADM') {
         throw new Error('Não é possível excluir o administrador padrão.');
     }
-    users = users.filter(u => u.id !== id);
-    authService.saveUsers(users);
+    UserRepository.delete(id);
   }
 };
