@@ -2,39 +2,44 @@ import { User } from '../types';
 import { UserRepository } from '../database/repositories/UserRepository';
 
 // Initialize default admin if not exists
-const initializeAuth = () => {
-  const users = UserRepository.getAll();
+const initializeAuth = async () => {
+  const users = await UserRepository.getAll();
   if (users.length === 0) {
     const defaultAdmin: User = {
-      id: '1',
+      id: '1', // No Supabase o UUID seria gerado, mas para consistência deixamos string
       username: 'ADM',
-      password: '123456', // In a real app, this should be hashed
+      password: '123456', 
       name: 'Administrador',
       role: 'admin',
       isFirstLogin: true,
       isActive: true
     };
-    UserRepository.create(defaultAdmin);
+    await UserRepository.create(defaultAdmin);
   }
 };
 
+// Não podemos usar await no top-level em todos os ambientes, então chamamos sem await
 initializeAuth();
 
 export const authService = {
-  getUsers: (): User[] => {
+  getUsers: async (): Promise<User[]> => {
     return UserRepository.getAll();
   },
 
-  saveUsers: (users: User[]) => {
-    UserRepository.saveAll(users);
+  saveUsers: async (users: User[]) => {
+    // Em modo Supabase, saveAll não é eficiente, ideal seria updates individuais
+    // Mas para manter compatibilidade com LocalStorage:
+    for (const u of users) {
+        await UserRepository.update(u); 
+    }
   },
 
-  login: (username: string, password: string): { success: boolean; user?: User; error?: string } => {
-    const users = UserRepository.getAll();
+  login: async (username: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> => {
+    const users = await UserRepository.getAll();
     const user = users.find(u => u.username.toUpperCase() === username.toUpperCase() && u.isActive);
 
     if (user && user.password === password) {
-      const { password, ...safeUser } = user; // Remove password from session
+      const { password, ...safeUser } = user;
       UserRepository.setSession(safeUser);
       return { success: true, user: user };
     }
@@ -50,41 +55,39 @@ export const authService = {
     return UserRepository.getSession();
   },
 
-  changePassword: (userId: string, newPassword: string) => {
-    const users = UserRepository.getAll();
-    const updatedUsers = users.map(u => {
-      if (u.id === userId) {
-        return { ...u, password: newPassword, isFirstLogin: false };
-      }
-      return u;
-    });
-    UserRepository.saveAll(updatedUsers);
-    
-    // Update session if it's the current user
-    const currentUser = UserRepository.getSession();
-    if (currentUser && currentUser.id === userId) {
-        UserRepository.setSession({ ...currentUser, isFirstLogin: false });
+  changePassword: async (userId: string, newPassword: string) => {
+    const users = await UserRepository.getAll();
+    const user = users.find(u => u.id === userId);
+    if (user) {
+        const updatedUser = { ...user, password: newPassword, isFirstLogin: false };
+        await UserRepository.update(updatedUser);
+        
+        // Update session if it's the current user
+        const currentUser = UserRepository.getSession();
+        if (currentUser && currentUser.id === userId) {
+            UserRepository.setSession({ ...currentUser, isFirstLogin: false });
+        }
     }
   },
 
-  createUser: (user: Omit<User, 'id'>) => {
-    const users = UserRepository.getAll();
+  createUser: async (user: Omit<User, 'id'>) => {
+    const users = await UserRepository.getAll();
     if (users.some(u => u.username.toUpperCase() === user.username.toUpperCase())) {
       throw new Error('Nome de usuário já existe.');
     }
     const newUser: User = { ...user, id: crypto.randomUUID() };
-    UserRepository.create(newUser);
+    await UserRepository.create(newUser);
   },
 
-  updateUser: (user: User) => {
-    UserRepository.update(user);
+  updateUser: async (user: User) => {
+    await UserRepository.update(user);
   },
 
-  deleteUser: (id: string) => {
-    const userToDelete = UserRepository.getById(id);
+  deleteUser: async (id: string) => {
+    const userToDelete = await UserRepository.getById(id);
     if (userToDelete?.username === 'ADM') {
         throw new Error('Não é possível excluir o administrador padrão.');
     }
-    UserRepository.delete(id);
+    await UserRepository.delete(id);
   }
 };

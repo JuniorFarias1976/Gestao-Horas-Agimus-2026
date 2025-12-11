@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User } from '../types';
 import { authService } from '../services/authService';
-import { Lock, User as UserIcon, ArrowRight, ShieldCheck, Wallet } from 'lucide-react';
+import { Lock, User as UserIcon, ArrowRight, ShieldCheck, Wallet, Loader2 } from 'lucide-react';
 
 interface LoginProps {
   onLoginSuccess: (user: User) => void;
@@ -11,51 +11,61 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [isFirstLogin, setIsFirstLogin] = useState(false);
   const [tempUser, setTempUser] = useState<User | null>(null);
   
-  // Password change state
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
-    const result = authService.login(username, password);
-    
-    if (result.success && result.user) {
-      if (result.user.isFirstLogin) {
-        setIsFirstLogin(true);
-        setTempUser(result.user);
+    try {
+      const result = await authService.login(username, password);
+      
+      if (result.success && result.user) {
+        if (result.user.isFirstLogin) {
+          setIsFirstLogin(true);
+          setTempUser(result.user);
+        } else {
+          onLoginSuccess(result.user);
+        }
       } else {
-        onLoginSuccess(result.user);
+        setError(result.error || 'Erro ao entrar.');
       }
-    } else {
-      setError(result.error || 'Erro ao entrar.');
+    } catch (err) {
+      setError('Erro de conexão.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleChangePassword = (e: React.FormEvent) => {
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
     if (newPassword.length < 6) {
       setError('A nova senha deve ter pelo menos 6 caracteres.');
+      setLoading(false);
       return;
     }
 
     if (newPassword !== confirmPassword) {
       setError('As senhas não coincidem.');
+      setLoading(false);
       return;
     }
 
     if (tempUser) {
-      authService.changePassword(tempUser.id, newPassword);
-      // Re-login essentially
+      await authService.changePassword(tempUser.id, newPassword);
       const updatedUser = { ...tempUser, isFirstLogin: false };
       onLoginSuccess(updatedUser);
     }
+    setLoading(false);
   };
 
   if (isFirstLogin) {
@@ -102,9 +112,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
              <button 
                type="submit"
-               className="w-full bg-orange-600 text-white py-3 rounded-lg font-bold hover:bg-orange-700 transition-colors flex items-center justify-center gap-2"
+               disabled={loading}
+               className="w-full bg-orange-600 text-white py-3 rounded-lg font-bold hover:bg-orange-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
              >
-               Salvar e Entrar <ArrowRight className="w-4 h-4" />
+               {loading ? <Loader2 className="w-4 h-4 animate-spin"/> : <ArrowRight className="w-4 h-4" />}
+               Salvar e Entrar
              </button>
            </form>
         </div>
@@ -175,9 +187,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
            <button
              type="submit"
-             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 transition-all duration-200 flex items-center justify-center gap-2"
+             disabled={loading}
+             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-70"
            >
-             Acessar Sistema <ArrowRight className="w-5 h-5" />
+             {loading ? <Loader2 className="w-5 h-5 animate-spin"/> : <ArrowRight className="w-5 h-5" />}
+             Acessar Sistema
            </button>
         </form>
 

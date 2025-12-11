@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { TimeEntry, Period } from '../types';
-import { Plus, Trash2, Clock, AlertCircle, CalendarDays, BarChart3, List, Utensils } from 'lucide-react';
+import { Plus, Trash2, Clock, AlertCircle, CalendarDays, BarChart3, List, Utensils, FileDown } from 'lucide-react';
 import { calculateNetDuration, calculateHoursBreakdown, formatCurrency, formatDate, formatNumber } from '../utils/formatters';
+import { exportToCSV } from '../services/csvExportService';
 import { 
   BarChart, 
   Bar, 
@@ -119,6 +120,25 @@ export const TimeSheet: React.FC<TimeSheetProps> = ({ entries, period, hourlyRat
     e.preventDefault();
     setDinnerStart('20:00');
     setDinnerEnd('21:00');
+  };
+
+  const handleExportCSV = () => {
+    const dataToExport = entries.map(e => ({
+      Data: e.date,
+      Entrada: e.startTime,
+      SaidaAlmoco: e.lunchStartTime,
+      VoltaAlmoco: e.lunchEndTime,
+      SaidaJantar: e.dinnerStartTime || '',
+      VoltaJantar: e.dinnerEndTime || '',
+      Saida: e.endTime,
+      TotalHoras: e.totalHours,
+      HorasNormais: e.regularHours,
+      HorasExtras: e.overtimeHours,
+      ValorGanho: e.earnings,
+      FeriadoFDS: e.isHoliday ? 'SIM' : 'NAO',
+      Descricao: e.description
+    }));
+    exportToCSV(dataToExport, `horas_${period.id}.csv`);
   };
 
   // Calculate totals
@@ -293,13 +313,24 @@ export const TimeSheet: React.FC<TimeSheetProps> = ({ entries, period, hourlyRat
            <h4 className="font-semibold text-slate-700 text-sm uppercase tracking-wide">
              Registros do Período
            </h4>
-           <button 
-             onClick={() => setShowChart(!showChart)}
-             className="flex items-center gap-2 text-xs font-medium bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
-           >
-             {showChart ? <List className="w-4 h-4" /> : <BarChart3 className="w-4 h-4" />}
-             {showChart ? 'Ver Lista' : 'Ver Gráfico'}
-           </button>
+           <div className="flex gap-2">
+             <button 
+                onClick={handleExportCSV}
+                className="flex items-center gap-2 text-xs font-medium bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
+                title="Exportar CSV"
+             >
+                <FileDown className="w-4 h-4" />
+                <span className="hidden sm:inline">CSV</span>
+             </button>
+
+             <button 
+               onClick={() => setShowChart(!showChart)}
+               className="flex items-center gap-2 text-xs font-medium bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
+             >
+               {showChart ? <List className="w-4 h-4" /> : <BarChart3 className="w-4 h-4" />}
+               {showChart ? 'Ver Lista' : 'Ver Gráfico'}
+             </button>
+           </div>
         </div>
 
         {showChart ? (

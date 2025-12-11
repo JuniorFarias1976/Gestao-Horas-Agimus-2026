@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../types';
 import { authService } from '../services/authService';
-import { UserPlus, Trash2, RefreshCw, Users, Shield, User as UserIcon, CheckCircle, X } from 'lucide-react';
+import { exportDatabaseToCSV } from '../services/csvExportService';
+import { UserPlus, Trash2, RefreshCw, Users, Shield, User as UserIcon, CheckCircle, X, Download, Database } from 'lucide-react';
 
 export const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -14,13 +15,15 @@ export const UserManagement: React.FC = () => {
   });
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     loadUsers();
   }, []);
 
-  const loadUsers = () => {
-    setUsers(authService.getUsers());
+  const loadUsers = async () => {
+    const usersList = await authService.getUsers();
+    setUsers(usersList);
   };
 
   const showSuccess = (message: string) => {
@@ -30,17 +33,17 @@ export const UserManagement: React.FC = () => {
     }, 3000);
   };
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
     try {
-      authService.createUser({
+      await authService.createUser({
         ...formData,
         isFirstLogin: true,
         isActive: true
       });
-      loadUsers();
+      await loadUsers();
       setIsAdding(false);
       setFormData({ name: '', username: '', password: '', role: 'user' });
       showSuccess('Usuário criado com sucesso!');
@@ -49,11 +52,11 @@ export const UserManagement: React.FC = () => {
     }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Tem certeza que deseja excluir este usuário?')) {
       try {
-        authService.deleteUser(id);
-        loadUsers();
+        await authService.deleteUser(id);
+        await loadUsers();
         showSuccess('Usuário excluído com sucesso.');
       } catch (err: any) {
         alert(err.message);
@@ -61,14 +64,26 @@ export const UserManagement: React.FC = () => {
     }
   };
 
-  const handleResetPassword = (id: string) => {
+  const handleResetPassword = async (id: string) => {
     if (confirm('Resetar senha para "123456" e forçar troca no próximo login?')) {
-        authService.changePassword(id, '123456');
-        const allUsers = authService.getUsers();
+        await authService.changePassword(id, '123456');
+        const allUsers = await authService.getUsers();
         const updated = allUsers.map(u => u.id === id ? { ...u, isFirstLogin: true } : u);
-        authService.saveUsers(updated);
-        loadUsers();
+        await authService.saveUsers(updated);
+        await loadUsers();
         showSuccess('Senha resetada para "123456" com sucesso.');
+    }
+  };
+
+  const handleExportCSV = async () => {
+    setIsExporting(true);
+    try {
+      await exportDatabaseToCSV();
+      showSuccess('Download dos arquivos CSV iniciado.');
+    } catch (err) {
+      alert('Erro ao exportar dados.');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -89,21 +104,35 @@ export const UserManagement: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex justify-between items-center">
+      {/* Header & Main Actions */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
              <Users className="w-5 h-5 text-blue-600" />
-             Base de Dados / RCM (Usuários)
+             Introdução de User
            </h2>
            <p className="text-sm text-slate-500">Gerencie o acesso de colaboradores e administradores.</p>
         </div>
-        <button 
-          onClick={() => setIsAdding(!isAdding)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${isAdding ? 'bg-slate-100 text-slate-600' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
-        >
-          <UserPlus className="w-4 h-4" />
-          {isAdding ? 'Cancelar' : 'Novo Usuário'}
-        </button>
+        
+        <div className="flex gap-3">
+          <button 
+            onClick={handleExportCSV}
+            disabled={isExporting}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+            title="Baixar todas as tabelas em CSV"
+          >
+            {isExporting ? <Database className="w-4 h-4 animate-pulse" /> : <Download className="w-4 h-4" />}
+            {isExporting ? 'Exportando...' : 'Exportar CSV'}
+          </button>
+
+          <button 
+            onClick={() => setIsAdding(!isAdding)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${isAdding ? 'bg-slate-100 text-slate-600' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+          >
+            <UserPlus className="w-4 h-4" />
+            {isAdding ? 'Cancelar' : 'Novo Usuário'}
+          </button>
+        </div>
       </div>
 
       {isAdding && (

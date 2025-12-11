@@ -11,7 +11,8 @@ import {
   User as UserIcon,
   FileDown,
   LogOut,
-  Users
+  Users,
+  Loader2
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -56,11 +57,13 @@ export default function App() {
   // App State
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   
-  // Load data from FinancialRepository
-  const [settings, setSettings] = useState<AppSettings>(() => FinancialRepository.getSettings());
-  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(() => FinancialRepository.getTimeEntries());
-  const [expenseEntries, setExpenseEntries] = useState<ExpenseEntry[]>(() => FinancialRepository.getExpenses());
-  const [advances, setAdvances] = useState<AdvanceEntry[]>(() => FinancialRepository.getAdvances());
+  // Data State - Now initialized empty
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
+  const [expenseEntries, setExpenseEntries] = useState<ExpenseEntry[]>([]);
+  const [advances, setAdvances] = useState<AdvanceEntry[]>([]);
+  
+  const [isLoading, setIsLoading] = useState(true);
 
   const [periods] = useState<Period[]>(generatePeriods());
   
@@ -73,19 +76,57 @@ export default function App() {
 
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>(periods[currentPeriodIndex]?.id);
 
-  // Persistence - Save to FinancialRepository on change
-  useEffect(() => FinancialRepository.saveSettings(settings), [settings]);
-  useEffect(() => FinancialRepository.saveTimeEntries(timeEntries), [timeEntries]);
-  useEffect(() => FinancialRepository.saveExpenses(expenseEntries), [expenseEntries]);
-  useEffect(() => FinancialRepository.saveAdvances(advances), [advances]);
+  // Load Data Async on Mount (or when user changes)
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        const loadedSettings = await FinancialRepository.getSettings();
+        const loadedTime = await FinancialRepository.getTimeEntries();
+        const loadedExpenses = await FinancialRepository.getExpenses();
+        const loadedAdvances = await FinancialRepository.getAdvances();
+        
+        setSettings(loadedSettings);
+        setTimeEntries(loadedTime);
+        setExpenseEntries(loadedExpenses);
+        setAdvances(loadedAdvances);
+      } catch (e) {
+        console.error("Failed to load data", e);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    if (currentUser) {
+       loadData();
+    }
+  }, [currentUser]);
+
+  // Persistence logic - We wrap these to ensure we don't save null/empty states during load
+  // IMPORTANT: For Supabase, auto-save on every state change can be heavy (too many requests).
+  // Ideally we should use explicit save actions, but to keep app structure we'll debounce or just allow it for now.
+  useEffect(() => {
+    if (!isLoading && settings) FinancialRepository.saveSettings(settings);
+  }, [settings, isLoading]);
+
+  useEffect(() => {
+    if (!isLoading && timeEntries.length > 0) FinancialRepository.saveTimeEntries(timeEntries);
+  }, [timeEntries, isLoading]);
+
+  useEffect(() => {
+    if (!isLoading && expenseEntries.length > 0) FinancialRepository.saveExpenses(expenseEntries);
+  }, [expenseEntries, isLoading]);
+
+  useEffect(() => {
+    if (!isLoading && advances.length > 0) FinancialRepository.saveAdvances(advances);
+  }, [advances, isLoading]);
 
   // Sync Logged User Name with Settings
   useEffect(() => {
-    if (currentUser && currentUser.name !== settings.userName) {
-      // Optional: Auto-update the "Colaborador Name" based on login
-      setSettings(prev => ({ ...prev, userName: currentUser.name }));
+    if (currentUser && settings && currentUser.name !== settings.userName) {
+      setSettings(prev => prev ? ({ ...prev, userName: currentUser.name }) : null);
     }
-  }, [currentUser]);
+  }, [currentUser, settings?.userName]); // added settings?.userName check to avoid loop
 
   // Derived Data
   const selectedPeriod = periods.find(p => p.id === selectedPeriodId) || periods[0];
@@ -94,14 +135,18 @@ export default function App() {
   const filteredAdvances = useMemo(() => filterByPeriod(advances, selectedPeriod), [advances, selectedPeriod]);
 
   const totalHours = filteredTime.reduce((acc, curr) => acc + curr.totalHours, 0);
-  const totalRegular = filteredTime.reduce((acc, curr) => acc + curr.regularHours, 0);
+  // const totalRegular = filteredTime.reduce((acc, curr) => acc + curr.regularHours, 0);
   const totalOvertime = filteredTime.reduce((acc, curr) => acc + curr.overtimeHours, 0);
   const totalEarnings = filteredTime.reduce((acc, curr) => acc + curr.earnings, 0);
   const totalExpenses = filteredExpenses.reduce((acc, curr) => acc + curr.amount, 0);
   const totalAdvances = filteredAdvances.reduce((acc, curr) => acc + curr.amount, 0);
-  const totalFund = settings.expenseFund;
+  
+  // Safe access for settings
+  const totalFund = settings?.expenseFund || 0;
   const fundBalance = totalFund - totalExpenses;
   const netEarnings = totalEarnings - totalAdvances;
+  const currentCurrency = settings?.currency || 'EUR';
+  const currentUserName = settings?.userName || 'User';
 
   // Chart Data Preparation
   const chartData = useMemo(() => {
@@ -143,18 +188,35 @@ export default function App() {
   const handleLogout = () => {
     authService.logout();
     setCurrentUser(null);
+    setSettings(null);
+    setTimeEntries([]);
+    setExpenseEntries([]);
+    setAdvances([]);
   };
 
-  const handleAddTime = (entry: TimeEntry) => setTimeEntries([...timeEntries, entry]);
-  const handleDeleteTime = (id: string) => setTimeEntries(timeEntries.filter(e => e.id !== id));
+  const handleAddTime = (entry: TimeEntry) => {
+    setTimeEntries(prev => [...prev, entry]);
+    // Also explicitly save/add to DB could happen here, but useEffect handles "saveTimeEntries"
+  };
+  const handleDeleteTime = (id: string) => {
+    setTimeEntries(prev => prev.filter(e => e.id !== id));
+    FinancialRepository.deleteTimeEntry(id); // Explicit delete needed for Supabase
+  };
   
-  const handleAddExpense = (entry: ExpenseEntry) => setExpenseEntries([...expenseEntries, entry]);
-  const handleDeleteExpense = (id: string) => setExpenseEntries(expenseEntries.filter(e => e.id !== id));
+  const handleAddExpense = (entry: ExpenseEntry) => setExpenseEntries(prev => [...prev, entry]);
+  const handleDeleteExpense = (id: string) => {
+    setExpenseEntries(prev => prev.filter(e => e.id !== id));
+    FinancialRepository.deleteExpense(id);
+  };
 
-  const handleAddAdvance = (entry: AdvanceEntry) => setAdvances([...advances, entry]);
-  const handleDeleteAdvance = (id: string) => setAdvances(advances.filter(a => a.id !== id));
+  const handleAddAdvance = (entry: AdvanceEntry) => setAdvances(prev => [...prev, entry]);
+  const handleDeleteAdvance = (id: string) => {
+    setAdvances(prev => prev.filter(a => a.id !== id));
+    FinancialRepository.deleteAdvance(id);
+  };
 
   const updateRates = (regularRate: number, overtimeRate: number) => {
+    if (!settings) return;
     setSettings({ ...settings, hourlyRate: regularRate, overtimeRate });
     const updatedEntries = timeEntries.map(entry => {
       let regularHours, overtimeHours;
@@ -177,12 +239,24 @@ export default function App() {
   };
 
   const handleExportPDF = () => {
-    exportToPDF(filteredTime, filteredExpenses, filteredAdvances, selectedPeriod, settings);
+    if(settings) exportToPDF(filteredTime, filteredExpenses, filteredAdvances, selectedPeriod, settings);
   };
 
   // --- RENDER LOGIN IF NOT AUTHENTICATED ---
   if (!currentUser) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // --- RENDER LOADING ---
+  if (isLoading || !settings) {
+     return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+           <div className="text-center">
+              <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+              <p className="text-slate-500 font-medium">Carregando dados...</p>
+           </div>
+        </div>
+     );
   }
 
   return (
@@ -228,7 +302,7 @@ export default function App() {
                onClick={() => setActiveTab(Tab.USERS)}
                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === Tab.USERS ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-700'}`}
              >
-               <Users size={20} /> Base de Dados / RCM
+               <Users size={20} /> Introdução de User
              </button>
           )}
         </nav>
@@ -252,58 +326,60 @@ export default function App() {
           </button>
 
           {/* Configuration Inputs */}
-          <div className="pt-4 border-t border-slate-700 space-y-4">
-            <div>
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1 block">Nome do Colaborador (Relatório)</label>
-              <div className="relative">
-                 <span className="absolute left-3 top-2.5 text-slate-500">
-                   <UserIcon className="w-4 h-4" />
-                 </span>
-                 <input 
-                   type="text" 
-                   value={settings.userName}
-                   onChange={(e) => setSettings({ ...settings, userName: e.target.value })}
-                   className="w-full bg-slate-700 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                 />
+          {settings && (
+            <div className="pt-4 border-t border-slate-700 space-y-4">
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1 block">Nome do Colaborador (Relatório)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-500">
+                    <UserIcon className="w-4 h-4" />
+                  </span>
+                  <input 
+                    type="text" 
+                    value={settings.userName}
+                    onChange={(e) => setSettings({ ...settings, userName: e.target.value })}
+                    className="w-full bg-slate-700 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1 block">Valor Hora Normal (8h)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-slate-500">€</span>
+                  <input 
+                    type="number" 
+                    value={settings.hourlyRate}
+                    onChange={(e) => updateRates(Number(e.target.value), settings.overtimeRate)}
+                    className="w-full bg-slate-700 border border-slate-600 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-orange-400 mb-1 block">Valor Hora Extra</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-slate-500">€</span>
+                  <input 
+                    type="number" 
+                    value={settings.overtimeRate}
+                    onChange={(e) => updateRates(settings.hourlyRate, Number(e.target.value))}
+                    className="w-full bg-slate-700 border border-orange-900/50 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-orange-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-indigo-400 mb-1 block">Fundo Fixo (Base)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-slate-500">€</span>
+                  <input 
+                    type="number" 
+                    value={settings.expenseFund}
+                    onChange={(e) => setSettings({ ...settings, expenseFund: Number(e.target.value) })}
+                    className="w-full bg-slate-700 border border-indigo-900/50 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
               </div>
             </div>
-            <div>
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1 block">Valor Hora Normal (8h)</label>
-              <div className="relative">
-                 <span className="absolute left-3 top-2 text-slate-500">€</span>
-                 <input 
-                   type="number" 
-                   value={settings.hourlyRate}
-                   onChange={(e) => updateRates(Number(e.target.value), settings.overtimeRate)}
-                   className="w-full bg-slate-700 border border-slate-600 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                 />
-              </div>
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-orange-400 mb-1 block">Valor Hora Extra</label>
-              <div className="relative">
-                 <span className="absolute left-3 top-2 text-slate-500">€</span>
-                 <input 
-                   type="number" 
-                   value={settings.overtimeRate}
-                   onChange={(e) => updateRates(settings.hourlyRate, Number(e.target.value))}
-                   className="w-full bg-slate-700 border border-orange-900/50 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-orange-500 outline-none"
-                 />
-              </div>
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-indigo-400 mb-1 block">Fundo Fixo (Base)</label>
-              <div className="relative">
-                 <span className="absolute left-3 top-2 text-slate-500">€</span>
-                 <input 
-                   type="number" 
-                   value={settings.expenseFund}
-                   onChange={(e) => setSettings({ ...settings, expenseFund: Number(e.target.value) })}
-                   className="w-full bg-slate-700 border border-indigo-900/50 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                 />
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </aside>
 
@@ -328,9 +404,9 @@ export default function App() {
               {activeTab === Tab.TIMESHEET && 'Controle de Horas'}
               {activeTab === Tab.EXPENSES && 'Gestão de Despesas'}
               {activeTab === Tab.AI_REPORT && 'Inteligência Financeira'}
-              {activeTab === Tab.USERS && 'Gestão de Usuários (RCM)'}
+              {activeTab === Tab.USERS && 'Introdução de User'}
             </h2>
-            <p className="text-slate-500 text-sm">Controle de {settings.userName} (8h diárias + Extras).</p>
+            <p className="text-slate-500 text-sm">Controle de {currentUserName} (8h diárias + Extras).</p>
           </div>
           
           {activeTab !== Tab.USERS && (
@@ -361,7 +437,7 @@ export default function App() {
         </div>
 
         {/* Dashboard Content */}
-        {activeTab === Tab.DASHBOARD && (
+        {activeTab === Tab.DASHBOARD && settings && (
           <div className="space-y-6 animate-in fade-in duration-500">
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -374,21 +450,21 @@ export default function App() {
               />
               <SummaryCard 
                 title="A Receber (Líquido)" 
-                value={formatCurrency(netEarnings, settings.currency)} 
+                value={formatCurrency(netEarnings, currentCurrency)} 
                 icon={DollarSign} 
                 colorClass="bg-emerald-500" 
-                subValue={`Bruto: ${formatCurrency(totalEarnings, settings.currency)} - Adiant: ${formatCurrency(totalAdvances, settings.currency)}`}
+                subValue={`Bruto: ${formatCurrency(totalEarnings, currentCurrency)} - Adiant: ${formatCurrency(totalAdvances, currentCurrency)}`}
               />
               <SummaryCard 
                 title="Saldo Fundo Despesas" 
-                value={formatCurrency(fundBalance, settings.currency)} 
+                value={formatCurrency(fundBalance, currentCurrency)} 
                 icon={Wallet} 
                 colorClass={fundBalance >= 0 ? "bg-indigo-500" : "bg-red-500"}
-                subValue={`Restante de ${formatCurrency(totalFund, settings.currency)}`}
+                subValue={`Restante de ${formatCurrency(totalFund, currentCurrency)}`}
               />
               <SummaryCard 
                 title="Total Despesas" 
-                value={formatCurrency(totalExpenses, settings.currency)} 
+                value={formatCurrency(totalExpenses, currentCurrency)} 
                 icon={TrendingDown} 
                 colorClass="bg-rose-500" 
                 subValue="Gastos do Período"
@@ -404,11 +480,11 @@ export default function App() {
                   <BarChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                     <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => formatCurrency(value, settings.currency)} />
+                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => formatCurrency(value, currentCurrency)} />
                     <Tooltip 
                       cursor={{fill: '#f1f5f9'}}
                       contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                      formatter={(value: number) => formatCurrency(value, settings.currency)}
+                      formatter={(value: number) => formatCurrency(value, currentCurrency)}
                     />
                     <Legend />
                     <Bar dataKey="ganhos" name="Valor (Extras)" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
@@ -441,7 +517,7 @@ export default function App() {
                       ))}
                     </Pie>
                     <Tooltip 
-                      formatter={(value: number) => formatCurrency(value, settings.currency)}
+                      formatter={(value: number) => formatCurrency(value, currentCurrency)}
                       contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                     />
                     <Legend layout="vertical" verticalAlign="middle" align="right" />
@@ -458,7 +534,7 @@ export default function App() {
         )}
 
         {/* Other Tabs */}
-        {activeTab === Tab.TIMESHEET && (
+        {activeTab === Tab.TIMESHEET && settings && (
           <div className="animate-in slide-in-from-right-4 duration-300">
             <TimeSheet 
               entries={filteredTime} 
@@ -472,14 +548,14 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === Tab.EXPENSES && (
+        {activeTab === Tab.EXPENSES && settings && (
            <div className="animate-in slide-in-from-right-4 duration-300">
             <ExpenseTracker 
               expenses={filteredExpenses}
               advances={filteredAdvances}
               period={selectedPeriod}
               baseExpenseFund={settings.expenseFund}
-              onUpdateBaseFund={(val) => setSettings(prev => ({ ...prev, expenseFund: val }))}
+              onUpdateBaseFund={(val) => setSettings(prev => prev ? ({ ...prev, expenseFund: val }) : null)}
               currency={settings.currency}
               onAdd={handleAddExpense}
               onDelete={handleDeleteExpense}
@@ -490,7 +566,7 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === Tab.AI_REPORT && (
+        {activeTab === Tab.AI_REPORT && settings && (
           <div className="animate-in fade-in duration-500">
             <AiReport 
               period={selectedPeriod}
@@ -499,7 +575,7 @@ export default function App() {
               advances={filteredAdvances}
               totalEarnings={totalEarnings}
               totalExpenses={totalExpenses}
-              hourlyRate={settings.hourlyRate} // Note: This might be 0, report will adapt
+              hourlyRate={settings.hourlyRate}
               userName={settings.userName}
               totalFund={totalFund}
             />
