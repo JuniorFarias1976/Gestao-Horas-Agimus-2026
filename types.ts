@@ -1,5 +1,7 @@
+
 export interface TimeEntry {
   id: string;
+  userId: string; // Added for isolation
   date: string; // YYYY-MM-DD
   startTime: string; // HH:mm
   lunchStartTime?: string; // HH:mm
@@ -12,11 +14,12 @@ export interface TimeEntry {
   regularHours: number;
   overtimeHours: number;
   earnings: number;
-  isHoliday?: boolean; // New field for Weekend/Holiday
+  isHoliday?: boolean; 
 }
 
 export interface ExpenseEntry {
   id: string;
+  userId: string; // Added for isolation
   date: string; // YYYY-MM-DD
   amount: number;
   category: string;
@@ -26,12 +29,14 @@ export interface ExpenseEntry {
 
 export interface AdvanceEntry {
   id: string;
+  userId: string; // Added for isolation
   date: string; // YYYY-MM-DD
   amount: number;
   description?: string;
 }
 
 export interface AppSettings {
+  userId: string; // Added for isolation
   hourlyRate: number; // Rate for first 8 hours (Normal)
   overtimeRate: number; // Rate for hours > 8 (Extra)
   dailyLimit: number; // Default 8

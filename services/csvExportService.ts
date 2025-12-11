@@ -1,3 +1,4 @@
+
 import { UserRepository } from '../database/repositories/UserRepository';
 import { FinancialRepository } from '../database/repositories/FinancialRepository';
 
@@ -74,10 +75,10 @@ export const exportDatabaseToCSV = async () => {
   try {
     // 1. Fetch all data
     const users = await UserRepository.getAll();
-    const settings = await FinancialRepository.getSettings();
-    const timeEntries = await FinancialRepository.getTimeEntries();
-    const expenses = await FinancialRepository.getExpenses();
-    const advances = await FinancialRepository.getAdvances();
+    const settings = await FinancialRepository.getAllSettings();
+    const timeEntries = await FinancialRepository.getAllTimeEntries();
+    const expenses = await FinancialRepository.getAllExpenses();
+    const advances = await FinancialRepository.getAllAdvances();
 
     // 2. Prepare Data (Clean up passwords or sensitive data if necessary)
     const safeUsers = users.map(u => ({
@@ -98,9 +99,9 @@ export const exportDatabaseToCSV = async () => {
       await sleep(500);
     }
 
-    // Settings is a single object, wrap in array
-    if (settings) {
-      downloadFile(convertToCSV([settings]), 'db_settings.csv');
+    // Settings is now an array of AppSettings
+    if (settings && settings.length > 0) {
+      downloadFile(convertToCSV(settings), 'db_settings.csv');
       await sleep(500);
     }
 

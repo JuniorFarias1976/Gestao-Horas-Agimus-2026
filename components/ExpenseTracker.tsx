@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { ExpenseEntry, AdvanceEntry, Period } from '../types';
 import { Plus, Trash2, Receipt, PiggyBank, ArrowDownCircle, AlertCircle, Search, Filter, FileText } from 'lucide-react';
@@ -11,6 +12,7 @@ interface ExpenseTrackerProps {
   baseExpenseFund: number;
   onUpdateBaseFund: (value: number) => void;
   currency: string;
+  userId: string;
   onAdd: (entry: ExpenseEntry) => void;
   onDelete: (id: string) => void;
   onAddAdvance: (entry: AdvanceEntry) => void;
@@ -35,6 +37,7 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
   baseExpenseFund,
   onUpdateBaseFund,
   currency,
+  userId,
   onAdd, 
   onDelete,
   onAddAdvance,
@@ -62,6 +65,7 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
 
     const newEntry: ExpenseEntry = {
       id: crypto.randomUUID(),
+      userId,
       date,
       amount: parseFloat(amount),
       category,
@@ -81,6 +85,7 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
 
     const newAdvance: AdvanceEntry = {
       id: crypto.randomUUID(),
+      userId,
       date: advDate,
       amount: parseFloat(advAmount),
       description: advDesc

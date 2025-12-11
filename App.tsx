@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   LayoutDashboard, 
@@ -80,13 +81,15 @@ export default function App() {
   // Load Data Async on Mount (or when user changes)
   useEffect(() => {
     const loadData = async () => {
+      if (!currentUser) return;
+
       setIsLoading(true);
       setLoadingText("Carregando dados...");
       try {
-        const loadedSettings = await FinancialRepository.getSettings();
-        const loadedTime = await FinancialRepository.getTimeEntries();
-        const loadedExpenses = await FinancialRepository.getExpenses();
-        const loadedAdvances = await FinancialRepository.getAdvances();
+        const loadedSettings = await FinancialRepository.getSettings(currentUser.id);
+        const loadedTime = await FinancialRepository.getTimeEntries(currentUser.id);
+        const loadedExpenses = await FinancialRepository.getExpenses(currentUser.id);
+        const loadedAdvances = await FinancialRepository.getAdvances(currentUser.id);
         
         setSettings(loadedSettings);
         setTimeEntries(loadedTime);
@@ -104,31 +107,29 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // Persistence logic - We wrap these to ensure we don't save null/empty states during load
-  // IMPORTANT: For Supabase, auto-save on every state change can be heavy (too many requests).
-  // Ideally we should use explicit save actions, but to keep app structure we'll debounce or just allow it for now.
+  // Persistence logic 
   useEffect(() => {
-    if (!isLoading && settings) FinancialRepository.saveSettings(settings);
-  }, [settings, isLoading]);
+    if (!isLoading && settings && currentUser) FinancialRepository.saveSettings(settings);
+  }, [settings, isLoading, currentUser]);
 
   useEffect(() => {
-    if (!isLoading && timeEntries.length > 0) FinancialRepository.saveTimeEntries(timeEntries);
-  }, [timeEntries, isLoading]);
+    if (!isLoading && timeEntries.length > 0 && currentUser) FinancialRepository.saveTimeEntries(timeEntries, currentUser.id);
+  }, [timeEntries, isLoading, currentUser]);
 
   useEffect(() => {
-    if (!isLoading && expenseEntries.length > 0) FinancialRepository.saveExpenses(expenseEntries);
-  }, [expenseEntries, isLoading]);
+    if (!isLoading && expenseEntries.length > 0 && currentUser) FinancialRepository.saveExpenses(expenseEntries, currentUser.id);
+  }, [expenseEntries, isLoading, currentUser]);
 
   useEffect(() => {
-    if (!isLoading && advances.length > 0) FinancialRepository.saveAdvances(advances);
-  }, [advances, isLoading]);
+    if (!isLoading && advances.length > 0 && currentUser) FinancialRepository.saveAdvances(advances, currentUser.id);
+  }, [advances, isLoading, currentUser]);
 
   // Sync Logged User Name with Settings
   useEffect(() => {
     if (currentUser && settings && currentUser.name !== settings.userName) {
       setSettings(prev => prev ? ({ ...prev, userName: currentUser.name }) : null);
     }
-  }, [currentUser, settings?.userName]); // added settings?.userName check to avoid loop
+  }, [currentUser, settings?.userName]);
 
   // Derived Data
   const selectedPeriod = periods.find(p => p.id === selectedPeriodId) || periods[0];
@@ -192,15 +193,16 @@ export default function App() {
     setLoadingText("Salvando alterações...");
     
     try {
-      // Garantir que todos os dados atuais sejam salvos antes de sair
-      const promises = [];
-      if (settings) promises.push(FinancialRepository.saveSettings(settings));
-      if (timeEntries.length > 0) promises.push(FinancialRepository.saveTimeEntries(timeEntries));
-      if (expenseEntries.length > 0) promises.push(FinancialRepository.saveExpenses(expenseEntries));
-      if (advances.length > 0) promises.push(FinancialRepository.saveAdvances(advances));
-      
-      if (promises.length > 0) {
-        await Promise.all(promises);
+      if (currentUser) {
+        const promises = [];
+        if (settings) promises.push(FinancialRepository.saveSettings(settings));
+        if (timeEntries.length > 0) promises.push(FinancialRepository.saveTimeEntries(timeEntries, currentUser.id));
+        if (expenseEntries.length > 0) promises.push(FinancialRepository.saveExpenses(expenseEntries, currentUser.id));
+        if (advances.length > 0) promises.push(FinancialRepository.saveAdvances(advances, currentUser.id));
+        
+        if (promises.length > 0) {
+          await Promise.all(promises);
+        }
       }
     } catch (error) {
       console.error("Erro ao salvar dados no logout:", error);
@@ -216,21 +218,31 @@ export default function App() {
   };
 
   const handleAddTime = (entry: TimeEntry) => {
-    setTimeEntries(prev => [...prev, entry]);
-    // Also explicitly save/add to DB could happen here, but useEffect handles "saveTimeEntries"
+    // The entry comes from TimeSheet with a dummy ID or passed prop, we ensure userId is correct here too
+    if (currentUser) {
+        setTimeEntries(prev => [...prev, { ...entry, userId: currentUser.id }]);
+    }
   };
   const handleDeleteTime = (id: string) => {
     setTimeEntries(prev => prev.filter(e => e.id !== id));
-    FinancialRepository.deleteTimeEntry(id); // Explicit delete needed for Supabase
+    FinancialRepository.deleteTimeEntry(id); 
   };
   
-  const handleAddExpense = (entry: ExpenseEntry) => setExpenseEntries(prev => [...prev, entry]);
+  const handleAddExpense = (entry: ExpenseEntry) => {
+    if (currentUser) {
+        setExpenseEntries(prev => [...prev, { ...entry, userId: currentUser.id }]);
+    }
+  };
   const handleDeleteExpense = (id: string) => {
     setExpenseEntries(prev => prev.filter(e => e.id !== id));
     FinancialRepository.deleteExpense(id);
   };
 
-  const handleAddAdvance = (entry: AdvanceEntry) => setAdvances(prev => [...prev, entry]);
+  const handleAddAdvance = (entry: AdvanceEntry) => {
+    if (currentUser) {
+        setAdvances(prev => [...prev, { ...entry, userId: currentUser.id }]);
+    }
+  };
   const handleDeleteAdvance = (id: string) => {
     setAdvances(prev => prev.filter(a => a.id !== id));
     FinancialRepository.deleteAdvance(id);
@@ -563,6 +575,7 @@ export default function App() {
               hourlyRate={settings.hourlyRate}
               overtimeRate={settings.overtimeRate}
               currency={settings.currency}
+              userId={currentUser.id}
               onAdd={handleAddTime}
               onDelete={handleDeleteTime}
             />
@@ -578,6 +591,7 @@ export default function App() {
               baseExpenseFund={settings.expenseFund}
               onUpdateBaseFund={(val) => setSettings(prev => prev ? ({ ...prev, expenseFund: val }) : null)}
               currency={settings.currency}
+              userId={currentUser.id}
               onAdd={handleAddExpense}
               onDelete={handleDeleteExpense}
               onAddAdvance={handleAddAdvance}

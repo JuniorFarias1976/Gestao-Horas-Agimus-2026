@@ -1,9 +1,10 @@
+
 import { TimeEntry, ExpenseEntry, AdvanceEntry, AppSettings } from '../../types';
 import { StorageProvider } from '../providers/StorageProvider';
 import { DB_KEYS } from '../config/keys';
 import { supabase, isSupabaseConfigured } from '../supabase/client';
 
-const DEFAULT_SETTINGS: AppSettings = {
+const DEFAULT_SETTINGS: Omit<AppSettings, 'userId'> = {
   hourlyRate: 0,
   overtimeRate: 8,
   dailyLimit: 8,
@@ -14,11 +15,12 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export const FinancialRepository = {
   // Settings
-  getSettings: async (): Promise<AppSettings> => {
+  getSettings: async (userId: string): Promise<AppSettings> => {
     if (isSupabaseConfigured()) {
-       const { data } = await supabase.from('settings').select('*').limit(1).single();
+       const { data } = await supabase.from('settings').select('*').eq('user_id', userId).limit(1).single();
        if (data) {
          return {
+           userId: data.user_id,
            hourlyRate: data.hourly_rate,
            overtimeRate: data.overtime_rate,
            dailyLimit: data.daily_limit,
@@ -27,17 +29,41 @@ export const FinancialRepository = {
            expenseFund: data.expense_fund
          };
        }
-       return DEFAULT_SETTINGS;
+       return { ...DEFAULT_SETTINGS, userId };
     }
-    const settings = StorageProvider.get<AppSettings>(DB_KEYS.SETTINGS, DEFAULT_SETTINGS);
-    return { ...DEFAULT_SETTINGS, ...settings };
+    
+    // LocalStorage: Settings needs to be an array now to support multiple users, or we filter from a collection
+    // For backward compatibility/simplicity, we treat DB_KEYS.SETTINGS as an array of settings objects
+    const allSettings = StorageProvider.get<AppSettings[]>(DB_KEYS.SETTINGS, []);
+    const userSettings = allSettings.find(s => s.userId === userId);
+    
+    return userSettings || { ...DEFAULT_SETTINGS, userId };
+  },
+
+  getAllSettings: async (): Promise<AppSettings[]> => {
+    if (isSupabaseConfigured()) {
+       const { data } = await supabase.from('settings').select('*');
+       if (data) {
+         return data.map((d: any) => ({
+           userId: d.user_id,
+           hourlyRate: d.hourly_rate,
+           overtimeRate: d.overtime_rate,
+           dailyLimit: d.daily_limit,
+           currency: d.currency,
+           userName: d.user_name,
+           expenseFund: d.expense_fund
+         }));
+       }
+       return [];
+    }
+    return StorageProvider.get<AppSettings[]>(DB_KEYS.SETTINGS, []);
   },
   
   saveSettings: async (settings: AppSettings): Promise<void> => {
     if (isSupabaseConfigured()) {
-       // Tenta pegar o ID primeiro ou assume que só tem 1 linha
-       const { data } = await supabase.from('settings').select('id').limit(1);
+       const { data } = await supabase.from('settings').select('id').eq('user_id', settings.userId).limit(1);
        const payload = {
+          user_id: settings.userId,
           hourly_rate: settings.hourlyRate,
           overtime_rate: settings.overtimeRate,
           daily_limit: settings.dailyLimit,
@@ -52,17 +78,21 @@ export const FinancialRepository = {
           await supabase.from('settings').insert(payload);
        }
     } else {
-      StorageProvider.set(DB_KEYS.SETTINGS, settings);
+      // LocalStorage: Read all, update specific user, save back
+      const allSettings = StorageProvider.get<AppSettings[]>(DB_KEYS.SETTINGS, []);
+      const otherSettings = allSettings.filter(s => s.userId !== settings.userId);
+      StorageProvider.set(DB_KEYS.SETTINGS, [...otherSettings, settings]);
     }
   },
 
   // Time Entries
-  getTimeEntries: async (): Promise<TimeEntry[]> => {
+  getTimeEntries: async (userId: string): Promise<TimeEntry[]> => {
     if (isSupabaseConfigured()) {
-       const { data, error } = await supabase.from('time_entries').select('*');
+       const { data, error } = await supabase.from('time_entries').select('*').eq('user_id', userId);
        if (error) return [];
        return data.map((e: any) => ({
          id: e.id,
+         userId: e.user_id,
          date: e.date,
          startTime: e.start_time,
          lunchStartTime: e.lunch_start_time,
@@ -78,8 +108,11 @@ export const FinancialRepository = {
          isHoliday: e.is_holiday
        }));
     }
-    const entries = StorageProvider.get<TimeEntry[]>(DB_KEYS.TIME_ENTRIES, []);
-    return entries.map((e: any) => ({
+    const allEntries = StorageProvider.get<TimeEntry[]>(DB_KEYS.TIME_ENTRIES, []);
+    // Filter for current user
+    const userEntries = allEntries.filter((e: any) => e.userId === userId);
+    
+    return userEntries.map((e: any) => ({
       ...e,
       isHoliday: e.isHoliday || false,
       regularHours: e.regularHours ?? Math.min(e.totalHours, 8),
@@ -87,13 +120,45 @@ export const FinancialRepository = {
     }));
   },
 
-  // Save All logic (Full Sync for simplicity in migration)
-  // Warning: In a real large app, you would use upsert individually
-  saveTimeEntries: async (entries: TimeEntry[]): Promise<void> => {
+  getAllTimeEntries: async (): Promise<TimeEntry[]> => {
     if (isSupabaseConfigured()) {
-       // Strategy: Upsert all.
-       const payload = entries.map(e => ({
+       const { data, error } = await supabase.from('time_entries').select('*');
+       if (error) return [];
+       return data.map((e: any) => ({
          id: e.id,
+         userId: e.user_id,
+         date: e.date,
+         startTime: e.start_time,
+         lunchStartTime: e.lunch_start_time,
+         lunchEndTime: e.lunch_end_time,
+         dinnerStartTime: e.dinner_start_time,
+         dinnerEndTime: e.dinner_end_time,
+         endTime: e.end_time,
+         description: e.description,
+         totalHours: e.total_hours,
+         regularHours: e.regular_hours,
+         overtimeHours: e.overtime_hours,
+         earnings: e.earnings,
+         isHoliday: e.is_holiday
+       }));
+    }
+    const allEntries = StorageProvider.get<TimeEntry[]>(DB_KEYS.TIME_ENTRIES, []);
+    return allEntries.map((e: any) => ({
+      ...e,
+      isHoliday: e.isHoliday || false,
+      regularHours: e.regularHours ?? Math.min(e.totalHours, 8),
+      overtimeHours: e.overtimeHours ?? Math.max(0, e.totalHours - 8)
+    }));
+  },
+
+  saveTimeEntries: async (userEntries: TimeEntry[], userId: string): Promise<void> => {
+    if (isSupabaseConfigured()) {
+       // Strategy: Upsert user entries. 
+       // Note: To strictly handle deletions made in UI, we'd need to delete items in DB not in 'userEntries' for this user.
+       // For now, we assume App.tsx manages additions/updates via this, and specific deletes via deleteTimeEntry.
+       const payload = userEntries.map(e => ({
+         id: e.id,
+         user_id: userId,
          date: e.date,
          start_time: e.startTime,
          lunch_start_time: e.lunchStartTime,
@@ -109,32 +174,58 @@ export const FinancialRepository = {
          is_holiday: e.isHoliday
        }));
        
-       // Note: This does not delete removed entries if using "Save All" logic from App.tsx
-       // For a perfect sync, we would delete entries not in this list, but that's risky without transactions.
-       // We will rely on upsert. If an item is deleted in UI, we should call delete explicitly.
        if (payload.length > 0) {
          await supabase.from('time_entries').upsert(payload);
        }
     } else {
-      StorageProvider.set(DB_KEYS.TIME_ENTRIES, entries);
+      // LocalStorage: Merge strategy
+      const allEntries = StorageProvider.get<TimeEntry[]>(DB_KEYS.TIME_ENTRIES, []);
+      // Keep entries from OTHER users
+      const otherUsersEntries = allEntries.filter(e => e.userId !== userId);
+      // Combine with NEW state for THIS user
+      const mergedEntries = [...otherUsersEntries, ...userEntries];
+      
+      StorageProvider.set(DB_KEYS.TIME_ENTRIES, mergedEntries);
     }
   },
   
-  // Explicit delete for Supabase
   deleteTimeEntry: async (id: string): Promise<void> => {
       if (isSupabaseConfigured()) {
           await supabase.from('time_entries').delete().eq('id', id);
+      } else {
+          // LocalStorage: Load all, remove specific ID, save
+          const allEntries = StorageProvider.get<TimeEntry[]>(DB_KEYS.TIME_ENTRIES, []);
+          const filtered = allEntries.filter(e => e.id !== id);
+          StorageProvider.set(DB_KEYS.TIME_ENTRIES, filtered);
       }
-      // Local storage handled by saveTimeEntries rewriting the array
   },
 
   // Expenses
-  getExpenses: async (): Promise<ExpenseEntry[]> => {
+  getExpenses: async (userId: string): Promise<ExpenseEntry[]> => {
+    if (isSupabaseConfigured()) {
+       const { data, error } = await supabase.from('expenses').select('*').eq('user_id', userId);
+       if (error) return [];
+       return data.map((e: any) => ({
+          id: e.id,
+          userId: e.user_id,
+          date: e.date,
+          amount: e.amount,
+          category: e.category,
+          description: e.description,
+          agNumber: e.ag_number
+       }));
+    }
+    const allExpenses = StorageProvider.get<ExpenseEntry[]>(DB_KEYS.EXPENSES, []);
+    return allExpenses.filter(e => e.userId === userId);
+  },
+
+  getAllExpenses: async (): Promise<ExpenseEntry[]> => {
     if (isSupabaseConfigured()) {
        const { data, error } = await supabase.from('expenses').select('*');
        if (error) return [];
        return data.map((e: any) => ({
           id: e.id,
+          userId: e.user_id,
           date: e.date,
           amount: e.amount,
           category: e.category,
@@ -145,10 +236,11 @@ export const FinancialRepository = {
     return StorageProvider.get<ExpenseEntry[]>(DB_KEYS.EXPENSES, []);
   },
 
-  saveExpenses: async (expenses: ExpenseEntry[]): Promise<void> => {
+  saveExpenses: async (userExpenses: ExpenseEntry[], userId: string): Promise<void> => {
     if (isSupabaseConfigured()) {
-       const payload = expenses.map(e => ({
+       const payload = userExpenses.map(e => ({
           id: e.id,
+          user_id: userId,
           date: e.date,
           amount: e.amount,
           category: e.category,
@@ -159,30 +251,53 @@ export const FinancialRepository = {
          await supabase.from('expenses').upsert(payload);
        }
     } else {
-      StorageProvider.set(DB_KEYS.EXPENSES, expenses);
+      const allExpenses = StorageProvider.get<ExpenseEntry[]>(DB_KEYS.EXPENSES, []);
+      const otherUsersExpenses = allExpenses.filter(e => e.userId !== userId);
+      StorageProvider.set(DB_KEYS.EXPENSES, [...otherUsersExpenses, ...userExpenses]);
     }
   },
 
   deleteExpense: async (id: string): Promise<void> => {
     if (isSupabaseConfigured()) {
         await supabase.from('expenses').delete().eq('id', id);
+    } else {
+        const allExpenses = StorageProvider.get<ExpenseEntry[]>(DB_KEYS.EXPENSES, []);
+        const filtered = allExpenses.filter(e => e.id !== id);
+        StorageProvider.set(DB_KEYS.EXPENSES, filtered);
     }
   },
 
   // Advances
-  getAdvances: async (): Promise<AdvanceEntry[]> => {
+  getAdvances: async (userId: string): Promise<AdvanceEntry[]> => {
+    if (isSupabaseConfigured()) {
+        const { data, error } = await supabase.from('advances').select('*').eq('user_id', userId);
+        if (error) return [];
+        return data.map((a: any) => ({
+            ...a,
+            userId: a.user_id
+        }));
+    }
+    const allAdvances = StorageProvider.get<AdvanceEntry[]>(DB_KEYS.ADVANCES, []);
+    return allAdvances.filter(a => a.userId === userId);
+  },
+
+  getAllAdvances: async (): Promise<AdvanceEntry[]> => {
     if (isSupabaseConfigured()) {
         const { data, error } = await supabase.from('advances').select('*');
         if (error) return [];
-        return data;
+        return data.map((a: any) => ({
+            ...a,
+            userId: a.user_id
+        }));
     }
     return StorageProvider.get<AdvanceEntry[]>(DB_KEYS.ADVANCES, []);
   },
 
-  saveAdvances: async (advances: AdvanceEntry[]): Promise<void> => {
+  saveAdvances: async (userAdvances: AdvanceEntry[], userId: string): Promise<void> => {
     if (isSupabaseConfigured()) {
-        const payload = advances.map(a => ({
+        const payload = userAdvances.map(a => ({
             id: a.id,
+            user_id: userId,
             date: a.date,
             amount: a.amount,
             description: a.description
@@ -191,13 +306,19 @@ export const FinancialRepository = {
             await supabase.from('advances').upsert(payload);
         }
     } else {
-      StorageProvider.set(DB_KEYS.ADVANCES, advances);
+        const allAdvances = StorageProvider.get<AdvanceEntry[]>(DB_KEYS.ADVANCES, []);
+        const otherUsersAdvances = allAdvances.filter(a => a.userId !== userId);
+        StorageProvider.set(DB_KEYS.ADVANCES, [...otherUsersAdvances, ...userAdvances]);
     }
   },
 
   deleteAdvance: async (id: string): Promise<void> => {
     if (isSupabaseConfigured()) {
         await supabase.from('advances').delete().eq('id', id);
+    } else {
+        const allAdvances = StorageProvider.get<AdvanceEntry[]>(DB_KEYS.ADVANCES, []);
+        const filtered = allAdvances.filter(a => a.id !== id);
+        StorageProvider.set(DB_KEYS.ADVANCES, filtered);
     }
   }
 };

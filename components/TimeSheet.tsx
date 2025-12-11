@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { TimeEntry, Period } from '../types';
 import { Plus, Trash2, Clock, AlertCircle, CalendarDays, BarChart3, List, Utensils, FileDown } from 'lucide-react';
@@ -20,11 +21,12 @@ interface TimeSheetProps {
   hourlyRate: number;
   overtimeRate: number;
   currency: string;
+  userId: string;
   onAdd: (entry: TimeEntry) => void;
   onDelete: (id: string) => void;
 }
 
-export const TimeSheet: React.FC<TimeSheetProps> = ({ entries, period, hourlyRate, overtimeRate, currency, onAdd, onDelete }) => {
+export const TimeSheet: React.FC<TimeSheetProps> = ({ entries, period, hourlyRate, overtimeRate, currency, userId, onAdd, onDelete }) => {
   const [date, setDate] = useState('');
   const [start, setStart] = useState('10:00');
   const [lunchStart, setLunchStart] = useState('12:00');
@@ -96,6 +98,7 @@ export const TimeSheet: React.FC<TimeSheetProps> = ({ entries, period, hourlyRat
 
     const newEntry: TimeEntry = {
       id: crypto.randomUUID(),
+      userId,
       date,
       startTime: start,
       lunchStartTime: lunchStart,
