@@ -13,6 +13,17 @@ const DEFAULT_SETTINGS: Omit<AppSettings, 'userId'> = {
   expenseFund: 0,
 };
 
+// Helper to ensure we always work with arrays, even if legacy data is malformed or an object
+const getSafeArray = <T>(key: string): T[] => {
+  const data = StorageProvider.get<any>(key, []);
+  if (Array.isArray(data)) {
+    return data;
+  }
+  // If we found a legacy object (non-array) where an array is expected, 
+  // we return an empty array to prevent crashes.
+  return [];
+};
+
 export const FinancialRepository = {
   // Settings
   getSettings: async (userId: string): Promise<AppSettings> => {
@@ -32,9 +43,8 @@ export const FinancialRepository = {
        return { ...DEFAULT_SETTINGS, userId };
     }
     
-    // LocalStorage: Settings needs to be an array now to support multiple users, or we filter from a collection
-    // For backward compatibility/simplicity, we treat DB_KEYS.SETTINGS as an array of settings objects
-    const allSettings = StorageProvider.get<AppSettings[]>(DB_KEYS.SETTINGS, []);
+    // LocalStorage
+    const allSettings = getSafeArray<AppSettings>(DB_KEYS.SETTINGS);
     const userSettings = allSettings.find(s => s.userId === userId);
     
     return userSettings || { ...DEFAULT_SETTINGS, userId };
@@ -56,7 +66,7 @@ export const FinancialRepository = {
        }
        return [];
     }
-    return StorageProvider.get<AppSettings[]>(DB_KEYS.SETTINGS, []);
+    return getSafeArray<AppSettings>(DB_KEYS.SETTINGS);
   },
   
   saveSettings: async (settings: AppSettings): Promise<void> => {
@@ -78,8 +88,8 @@ export const FinancialRepository = {
           await supabase.from('settings').insert(payload);
        }
     } else {
-      // LocalStorage: Read all, update specific user, save back
-      const allSettings = StorageProvider.get<AppSettings[]>(DB_KEYS.SETTINGS, []);
+      // LocalStorage
+      const allSettings = getSafeArray<AppSettings>(DB_KEYS.SETTINGS);
       const otherSettings = allSettings.filter(s => s.userId !== settings.userId);
       StorageProvider.set(DB_KEYS.SETTINGS, [...otherSettings, settings]);
     }
@@ -108,7 +118,7 @@ export const FinancialRepository = {
          isHoliday: e.is_holiday
        }));
     }
-    const allEntries = StorageProvider.get<TimeEntry[]>(DB_KEYS.TIME_ENTRIES, []);
+    const allEntries = getSafeArray<TimeEntry>(DB_KEYS.TIME_ENTRIES);
     // Filter for current user
     const userEntries = allEntries.filter((e: any) => e.userId === userId);
     
@@ -142,7 +152,7 @@ export const FinancialRepository = {
          isHoliday: e.is_holiday
        }));
     }
-    const allEntries = StorageProvider.get<TimeEntry[]>(DB_KEYS.TIME_ENTRIES, []);
+    const allEntries = getSafeArray<TimeEntry>(DB_KEYS.TIME_ENTRIES);
     return allEntries.map((e: any) => ({
       ...e,
       isHoliday: e.isHoliday || false,
@@ -153,9 +163,6 @@ export const FinancialRepository = {
 
   saveTimeEntries: async (userEntries: TimeEntry[], userId: string): Promise<void> => {
     if (isSupabaseConfigured()) {
-       // Strategy: Upsert user entries. 
-       // Note: To strictly handle deletions made in UI, we'd need to delete items in DB not in 'userEntries' for this user.
-       // For now, we assume App.tsx manages additions/updates via this, and specific deletes via deleteTimeEntry.
        const payload = userEntries.map(e => ({
          id: e.id,
          user_id: userId,
@@ -179,7 +186,7 @@ export const FinancialRepository = {
        }
     } else {
       // LocalStorage: Merge strategy
-      const allEntries = StorageProvider.get<TimeEntry[]>(DB_KEYS.TIME_ENTRIES, []);
+      const allEntries = getSafeArray<TimeEntry>(DB_KEYS.TIME_ENTRIES);
       // Keep entries from OTHER users
       const otherUsersEntries = allEntries.filter(e => e.userId !== userId);
       // Combine with NEW state for THIS user
@@ -193,8 +200,7 @@ export const FinancialRepository = {
       if (isSupabaseConfigured()) {
           await supabase.from('time_entries').delete().eq('id', id);
       } else {
-          // LocalStorage: Load all, remove specific ID, save
-          const allEntries = StorageProvider.get<TimeEntry[]>(DB_KEYS.TIME_ENTRIES, []);
+          const allEntries = getSafeArray<TimeEntry>(DB_KEYS.TIME_ENTRIES);
           const filtered = allEntries.filter(e => e.id !== id);
           StorageProvider.set(DB_KEYS.TIME_ENTRIES, filtered);
       }
@@ -215,7 +221,7 @@ export const FinancialRepository = {
           agNumber: e.ag_number
        }));
     }
-    const allExpenses = StorageProvider.get<ExpenseEntry[]>(DB_KEYS.EXPENSES, []);
+    const allExpenses = getSafeArray<ExpenseEntry>(DB_KEYS.EXPENSES);
     return allExpenses.filter(e => e.userId === userId);
   },
 
@@ -233,7 +239,7 @@ export const FinancialRepository = {
           agNumber: e.ag_number
        }));
     }
-    return StorageProvider.get<ExpenseEntry[]>(DB_KEYS.EXPENSES, []);
+    return getSafeArray<ExpenseEntry>(DB_KEYS.EXPENSES);
   },
 
   saveExpenses: async (userExpenses: ExpenseEntry[], userId: string): Promise<void> => {
@@ -251,7 +257,7 @@ export const FinancialRepository = {
          await supabase.from('expenses').upsert(payload);
        }
     } else {
-      const allExpenses = StorageProvider.get<ExpenseEntry[]>(DB_KEYS.EXPENSES, []);
+      const allExpenses = getSafeArray<ExpenseEntry>(DB_KEYS.EXPENSES);
       const otherUsersExpenses = allExpenses.filter(e => e.userId !== userId);
       StorageProvider.set(DB_KEYS.EXPENSES, [...otherUsersExpenses, ...userExpenses]);
     }
@@ -261,7 +267,7 @@ export const FinancialRepository = {
     if (isSupabaseConfigured()) {
         await supabase.from('expenses').delete().eq('id', id);
     } else {
-        const allExpenses = StorageProvider.get<ExpenseEntry[]>(DB_KEYS.EXPENSES, []);
+        const allExpenses = getSafeArray<ExpenseEntry>(DB_KEYS.EXPENSES);
         const filtered = allExpenses.filter(e => e.id !== id);
         StorageProvider.set(DB_KEYS.EXPENSES, filtered);
     }
@@ -277,7 +283,7 @@ export const FinancialRepository = {
             userId: a.user_id
         }));
     }
-    const allAdvances = StorageProvider.get<AdvanceEntry[]>(DB_KEYS.ADVANCES, []);
+    const allAdvances = getSafeArray<AdvanceEntry>(DB_KEYS.ADVANCES);
     return allAdvances.filter(a => a.userId === userId);
   },
 
@@ -290,7 +296,7 @@ export const FinancialRepository = {
             userId: a.user_id
         }));
     }
-    return StorageProvider.get<AdvanceEntry[]>(DB_KEYS.ADVANCES, []);
+    return getSafeArray<AdvanceEntry>(DB_KEYS.ADVANCES);
   },
 
   saveAdvances: async (userAdvances: AdvanceEntry[], userId: string): Promise<void> => {
@@ -306,7 +312,7 @@ export const FinancialRepository = {
             await supabase.from('advances').upsert(payload);
         }
     } else {
-        const allAdvances = StorageProvider.get<AdvanceEntry[]>(DB_KEYS.ADVANCES, []);
+        const allAdvances = getSafeArray<AdvanceEntry>(DB_KEYS.ADVANCES);
         const otherUsersAdvances = allAdvances.filter(a => a.userId !== userId);
         StorageProvider.set(DB_KEYS.ADVANCES, [...otherUsersAdvances, ...userAdvances]);
     }
@@ -316,7 +322,7 @@ export const FinancialRepository = {
     if (isSupabaseConfigured()) {
         await supabase.from('advances').delete().eq('id', id);
     } else {
-        const allAdvances = StorageProvider.get<AdvanceEntry[]>(DB_KEYS.ADVANCES, []);
+        const allAdvances = getSafeArray<AdvanceEntry>(DB_KEYS.ADVANCES);
         const filtered = allAdvances.filter(a => a.id !== id);
         StorageProvider.set(DB_KEYS.ADVANCES, filtered);
     }
