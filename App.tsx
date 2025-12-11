@@ -64,6 +64,7 @@ export default function App() {
   const [advances, setAdvances] = useState<AdvanceEntry[]>([]);
   
   const [isLoading, setIsLoading] = useState(true);
+  const [loadingText, setLoadingText] = useState("Carregando dados...");
 
   const [periods] = useState<Period[]>(generatePeriods());
   
@@ -80,6 +81,7 @@ export default function App() {
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
+      setLoadingText("Carregando dados...");
       try {
         const loadedSettings = await FinancialRepository.getSettings();
         const loadedTime = await FinancialRepository.getTimeEntries();
@@ -185,13 +187,32 @@ export default function App() {
     setActiveTab(Tab.DASHBOARD);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    setIsLoading(true);
+    setLoadingText("Salvando alterações...");
+    
+    try {
+      // Garantir que todos os dados atuais sejam salvos antes de sair
+      const promises = [];
+      if (settings) promises.push(FinancialRepository.saveSettings(settings));
+      if (timeEntries.length > 0) promises.push(FinancialRepository.saveTimeEntries(timeEntries));
+      if (expenseEntries.length > 0) promises.push(FinancialRepository.saveExpenses(expenseEntries));
+      if (advances.length > 0) promises.push(FinancialRepository.saveAdvances(advances));
+      
+      if (promises.length > 0) {
+        await Promise.all(promises);
+      }
+    } catch (error) {
+      console.error("Erro ao salvar dados no logout:", error);
+    }
+
     authService.logout();
     setCurrentUser(null);
     setSettings(null);
     setTimeEntries([]);
     setExpenseEntries([]);
     setAdvances([]);
+    setIsLoading(false);
   };
 
   const handleAddTime = (entry: TimeEntry) => {
@@ -253,7 +274,7 @@ export default function App() {
         <div className="min-h-screen flex items-center justify-center bg-slate-50">
            <div className="text-center">
               <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
-              <p className="text-slate-500 font-medium">Carregando dados...</p>
+              <p className="text-slate-500 font-medium">{loadingText}</p>
            </div>
         </div>
      );
