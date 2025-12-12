@@ -1,3 +1,4 @@
+
 import { User } from '../../types';
 import { StorageProvider } from '../providers/StorageProvider';
 import { DB_KEYS } from '../config/keys';
@@ -7,22 +8,28 @@ export const UserRepository = {
   getAll: async (): Promise<User[]> => {
     if (isSupabaseConfigured()) {
       const { data, error } = await supabase.from('app_users').select('*');
-      if (error) {
-        console.error('Supabase Error:', error);
-        return [];
+      
+      if (!error && data) {
+        return data.map((u: any) => ({
+          id: u.id,
+          username: u.username,
+          password: u.password,
+          name: u.name,
+          role: u.role,
+          isFirstLogin: u.is_first_login,
+          isActive: u.is_active
+        }));
       }
-      // Mapear campos do banco (snake_case) para camelCase se necessário, 
-      // mas neste caso ajustamos os tipos ou assumimos mapeamento direto.
-      // O SQL foi criado para bater com os tipos exceto snake_case.
-      return data.map((u: any) => ({
-        id: u.id,
-        username: u.username,
-        password: u.password,
-        name: u.name,
-        role: u.role,
-        isFirstLogin: u.is_first_login,
-        isActive: u.is_active
-      }));
+
+      if (error) {
+         // Se a tabela não existir (PGRST205), fazemos fallback para LocalStorage silenciosamente
+         if (error.code === 'PGRST205' || error.code === '42P01') {
+             console.warn('Supabase: Tabela "app_users" não encontrada. Usando LocalStorage.');
+         } else {
+             console.error('Supabase Error (getAll Users):', JSON.stringify(error, null, 2));
+             return [];
+         }
+      }
     }
     return StorageProvider.get<User[]>(DB_KEYS.USERS, []);
   },
@@ -33,6 +40,8 @@ export const UserRepository = {
   },
 
   create: async (user: User): Promise<void> => {
+    let successSupabase = false;
+
     if (isSupabaseConfigured()) {
       const { error } = await supabase.from('app_users').insert({
         id: user.id,
@@ -43,8 +52,20 @@ export const UserRepository = {
         is_first_login: user.isFirstLogin,
         is_active: user.isActive
       });
-      if (error) console.error('Error creating user:', error);
-    } else {
+      
+      if (!error) {
+        successSupabase = true;
+      } else {
+         if (error.code === 'PGRST205' || error.code === '42P01') {
+             console.warn('Supabase: Falha ao criar usuário (Tabela inexistente). Usando LocalStorage.');
+         } else {
+             console.error('Supabase Error (Create User):', JSON.stringify(error, null, 2));
+             return; // Erro real de API, aborta
+         }
+      }
+    } 
+    
+    if (!successSupabase) {
       const users = StorageProvider.get<User[]>(DB_KEYS.USERS, []);
       users.push(user);
       StorageProvider.set(DB_KEYS.USERS, users);
@@ -52,6 +73,8 @@ export const UserRepository = {
   },
 
   update: async (user: User): Promise<void> => {
+    let successSupabase = false;
+
     if (isSupabaseConfigured()) {
       const { error } = await supabase.from('app_users').update({
         username: user.username,
@@ -61,8 +84,20 @@ export const UserRepository = {
         is_first_login: user.isFirstLogin,
         is_active: user.isActive
       }).eq('id', user.id);
-      if (error) console.error('Error updating user:', error);
-    } else {
+
+      if (!error) {
+        successSupabase = true;
+      } else {
+         if (error.code === 'PGRST205' || error.code === '42P01') {
+            console.warn('Supabase: Falha ao atualizar (Tabela inexistente). Usando LocalStorage.');
+         } else {
+            console.error('Supabase Error (Update User):', JSON.stringify(error, null, 2));
+            return;
+         }
+      }
+    }
+    
+    if (!successSupabase) {
       const users = StorageProvider.get<User[]>(DB_KEYS.USERS, []);
       const index = users.findIndex(u => u.id === user.id);
       if (index !== -1) {
@@ -73,16 +108,29 @@ export const UserRepository = {
   },
 
   delete: async (id: string): Promise<void> => {
+    let successSupabase = false;
+
     if (isSupabaseConfigured()) {
-       await supabase.from('app_users').delete().eq('id', id);
-    } else {
+       const { error } = await supabase.from('app_users').delete().eq('id', id);
+       if (!error) {
+          successSupabase = true;
+       } else {
+          if (error.code === 'PGRST205' || error.code === '42P01') {
+             console.warn('Supabase: Falha ao excluir (Tabela inexistente). Usando LocalStorage.');
+          } else {
+             console.error('Supabase Error (Delete User):', JSON.stringify(error, null, 2));
+             return;
+          }
+       }
+    }
+    
+    if (!successSupabase) {
       const users = StorageProvider.get<User[]>(DB_KEYS.USERS, []);
       const filtered = users.filter(u => u.id !== id);
       StorageProvider.set(DB_KEYS.USERS, filtered);
     }
   },
   
-  // Session Management (Mantém LocalStorage pois é sessão local do navegador)
   getSession: (): User | null => {
     return StorageProvider.get<User | null>(DB_KEYS.SESSION, null);
   },

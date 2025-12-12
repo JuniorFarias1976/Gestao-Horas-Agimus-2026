@@ -1,20 +1,31 @@
+
 import { User } from '../types';
 import { UserRepository } from '../database/repositories/UserRepository';
 
 // Initialize default admin if not exists
 const initializeAuth = async () => {
-  const users = await UserRepository.getAll();
-  if (users.length === 0) {
-    const defaultAdmin: User = {
-      id: '1', // No Supabase o UUID seria gerado, mas para consistência deixamos string
-      username: 'ADM',
-      password: '123456', 
-      name: 'Administrador',
-      role: 'admin',
-      isFirstLogin: true,
-      isActive: true
-    };
-    await UserRepository.create(defaultAdmin);
+  try {
+    const users = await UserRepository.getAll();
+    if (users.length === 0) {
+      const defaultAdmin: User = {
+        id: crypto.randomUUID(), // Ensure unique ID generation
+        username: 'ADM',
+        password: '123456', 
+        name: 'Administrador',
+        role: 'admin',
+        isFirstLogin: true,
+        isActive: true
+      };
+      
+      try {
+         await UserRepository.create(defaultAdmin);
+         console.log('Default Admin user created successfully.');
+      } catch (createError) {
+         console.error('Failed to create default admin:', createError);
+      }
+    }
+  } catch (err) {
+    console.error('Auth Service Initialization Error:', err);
   }
 };
 
@@ -35,16 +46,21 @@ export const authService = {
   },
 
   login: async (username: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> => {
-    const users = await UserRepository.getAll();
-    const user = users.find(u => u.username.toUpperCase() === username.toUpperCase() && u.isActive);
+    try {
+      const users = await UserRepository.getAll();
+      const user = users.find(u => u.username.toUpperCase() === username.toUpperCase() && u.isActive);
 
-    if (user && user.password === password) {
-      const { password, ...safeUser } = user;
-      UserRepository.setSession(safeUser);
-      return { success: true, user: user };
+      if (user && user.password === password) {
+        const { password, ...safeUser } = user;
+        UserRepository.setSession(safeUser);
+        return { success: true, user: user };
+      }
+
+      return { success: false, error: 'Usuário ou senha inválidos.' };
+    } catch (error) {
+      console.error('Login error:', error);
+      return { success: false, error: 'Erro de conexão com o servidor.' };
     }
-
-    return { success: false, error: 'Usuário ou senha inválidos.' };
   },
 
   logout: () => {

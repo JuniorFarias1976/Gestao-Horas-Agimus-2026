@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { User } from '../types';
 import { authService } from '../services/authService';
-import { Lock, User as UserIcon, ArrowRight, ShieldCheck, Wallet, Loader2 } from 'lucide-react';
+import { checkConnection } from '../database/supabase/client';
+import { Lock, User as UserIcon, ArrowRight, ShieldCheck, Wallet, Loader2, Wifi, WifiOff } from 'lucide-react';
 
 interface LoginProps {
   onLoginSuccess: (user: User) => void;
@@ -17,6 +19,13 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Connection State
+  const [dbStatus, setDbStatus] = useState<{ connected: boolean; message: string }>({ connected: false, message: 'Verificando...' });
+
+  useEffect(() => {
+    checkConnection().then(setDbStatus);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -130,6 +139,13 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 opacity-20">
          <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-600 rounded-full blur-[120px]"></div>
          <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-purple-600 rounded-full blur-[120px]"></div>
+      </div>
+
+      <div className="absolute top-4 right-4 z-20">
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-md border shadow-sm ${dbStatus.connected ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-red-500/20 text-red-300 border-red-500/30'}`}>
+           {dbStatus.connected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+           {dbStatus.message}
+        </div>
       </div>
 
       <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl w-full max-w-md p-8 relative z-10 animate-in fade-in zoom-in duration-500">

@@ -13,7 +13,9 @@ import {
   FileDown,
   LogOut,
   Users,
-  Loader2
+  Loader2,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -33,6 +35,7 @@ import { TimeEntry, ExpenseEntry, AdvanceEntry, AppSettings, Tab, Period, User }
 import { generatePeriods, filterByPeriod, formatCurrency, calculateHoursBreakdown, formatNumber } from './utils/formatters';
 import { authService } from './services/authService';
 import { FinancialRepository } from './database/repositories/FinancialRepository';
+import { checkConnection } from './database/supabase/client';
 import { SummaryCard } from './components/SummaryCard';
 import { TimeSheet } from './components/TimeSheet';
 import { ExpenseTracker } from './components/ExpenseTracker';
@@ -47,12 +50,16 @@ export default function App() {
   // Auth State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-  // Initialize auth
+  // Connection State
+  const [dbStatus, setDbStatus] = useState<{ connected: boolean; message: string }>({ connected: false, message: 'Verificando...' });
+
+  // Initialize auth & check connection
   useEffect(() => {
     const user = authService.getCurrentUser();
     if (user) {
       setCurrentUser(user);
     }
+    checkConnection().then(setDbStatus);
   }, []);
 
   // App State
@@ -357,6 +364,12 @@ export default function App() {
           >
             <LogOut size={16} /> Sair
           </button>
+
+          {/* DB Status Indicator */}
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border ${dbStatus.connected ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+             {dbStatus.connected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+             {dbStatus.message}
+          </div>
 
           {/* Configuration Inputs */}
           {settings && (

@@ -13,14 +13,12 @@ const DEFAULT_SETTINGS: Omit<AppSettings, 'userId'> = {
   expenseFund: 0,
 };
 
-// Helper to ensure we always work with arrays, even if legacy data is malformed or an object
+// Helper to ensure we always work with arrays
 const getSafeArray = <T>(key: string): T[] => {
   const data = StorageProvider.get<any>(key, []);
   if (Array.isArray(data)) {
     return data;
   }
-  // If we found a legacy object (non-array) where an array is expected, 
-  // we return an empty array to prevent crashes.
   return [];
 };
 
@@ -28,8 +26,9 @@ export const FinancialRepository = {
   // Settings
   getSettings: async (userId: string): Promise<AppSettings> => {
     if (isSupabaseConfigured()) {
-       const { data } = await supabase.from('settings').select('*').eq('user_id', userId).limit(1).single();
-       if (data) {
+       const { data, error } = await supabase.from('settings').select('*').eq('user_id', userId).limit(1).maybeSingle();
+       
+       if (!error && data) {
          return {
            userId: data.user_id,
            hourlyRate: data.hourly_rate,
@@ -40,10 +39,22 @@ export const FinancialRepository = {
            expenseFund: data.expense_fund
          };
        }
-       return { ...DEFAULT_SETTINGS, userId };
+
+       if (error) {
+          if (error.code === 'PGRST205' || error.code === '42P01') {
+              console.warn('Supabase: Tabela "settings" faltando. Fallback LocalStorage.');
+          } else {
+              console.error('Supabase Error (getSettings):', JSON.stringify(error, null, 2));
+              // Se houver erro de conexão, tentamos retornar o default
+              return { ...DEFAULT_SETTINGS, userId };
+          }
+       } else if (!data) {
+           // No data found in Supabase (but table exists), return default
+           return { ...DEFAULT_SETTINGS, userId };
+       }
     }
     
-    // LocalStorage
+    // LocalStorage Fallback
     const allSettings = getSafeArray<AppSettings>(DB_KEYS.SETTINGS);
     const userSettings = allSettings.find(s => s.userId === userId);
     
@@ -52,8 +63,8 @@ export const FinancialRepository = {
 
   getAllSettings: async (): Promise<AppSettings[]> => {
     if (isSupabaseConfigured()) {
-       const { data } = await supabase.from('settings').select('*');
-       if (data) {
+       const { data, error } = await supabase.from('settings').select('*');
+       if (!error && data) {
          return data.map((d: any) => ({
            userId: d.user_id,
            hourlyRate: d.hourly_rate,
@@ -64,31 +75,52 @@ export const FinancialRepository = {
            expenseFund: d.expense_fund
          }));
        }
-       return [];
+       if (error && (error.code === 'PGRST205' || error.code === '42P01')) {
+           // Fallback
+       } else if (error) {
+           return [];
+       }
     }
     return getSafeArray<AppSettings>(DB_KEYS.SETTINGS);
   },
   
   saveSettings: async (settings: AppSettings): Promise<void> => {
+    let successSupabase = false;
     if (isSupabaseConfigured()) {
-       const { data } = await supabase.from('settings').select('id').eq('user_id', settings.userId).limit(1);
-       const payload = {
-          user_id: settings.userId,
-          hourly_rate: settings.hourlyRate,
-          overtime_rate: settings.overtimeRate,
-          daily_limit: settings.dailyLimit,
-          currency: settings.currency,
-          user_name: settings.userName,
-          expense_fund: settings.expenseFund
-       };
-
-       if (data && data.length > 0) {
-          await supabase.from('settings').update(payload).eq('id', data[0].id);
+       // Check existence first
+       const { data, error: fetchError } = await supabase.from('settings').select('id').eq('user_id', settings.userId).limit(1).maybeSingle();
+       
+       if (fetchError && (fetchError.code === 'PGRST205' || fetchError.code === '42P01')) {
+          // Table missing, skip to fallback
        } else {
-          await supabase.from('settings').insert(payload);
+           const payload = {
+              user_id: settings.userId,
+              hourly_rate: settings.hourlyRate,
+              overtime_rate: settings.overtimeRate,
+              daily_limit: settings.dailyLimit,
+              currency: settings.currency,
+              user_name: settings.userName,
+              expense_fund: settings.expenseFund
+           };
+
+           let saveError;
+           if (data) {
+              const { error } = await supabase.from('settings').update(payload).eq('id', data.id);
+              saveError = error;
+           } else {
+              const { error } = await supabase.from('settings').insert(payload);
+              saveError = error;
+           }
+           
+           if (!saveError) {
+              successSupabase = true;
+           } else if (saveError.code !== 'PGRST205' && saveError.code !== '42P01') {
+              console.error('Supabase Error (saveSettings):', JSON.stringify(saveError, null, 2));
+           }
        }
-    } else {
-      // LocalStorage
+    }
+
+    if (!successSupabase) {
       const allSettings = getSafeArray<AppSettings>(DB_KEYS.SETTINGS);
       const otherSettings = allSettings.filter(s => s.userId !== settings.userId);
       StorageProvider.set(DB_KEYS.SETTINGS, [...otherSettings, settings]);
@@ -99,27 +131,37 @@ export const FinancialRepository = {
   getTimeEntries: async (userId: string): Promise<TimeEntry[]> => {
     if (isSupabaseConfigured()) {
        const { data, error } = await supabase.from('time_entries').select('*').eq('user_id', userId);
-       if (error) return [];
-       return data.map((e: any) => ({
-         id: e.id,
-         userId: e.user_id,
-         date: e.date,
-         startTime: e.start_time,
-         lunchStartTime: e.lunch_start_time,
-         lunchEndTime: e.lunch_end_time,
-         dinnerStartTime: e.dinner_start_time,
-         dinnerEndTime: e.dinner_end_time,
-         endTime: e.end_time,
-         description: e.description,
-         totalHours: e.total_hours,
-         regularHours: e.regular_hours,
-         overtimeHours: e.overtime_hours,
-         earnings: e.earnings,
-         isHoliday: e.is_holiday
-       }));
+       
+       if (!error && data) {
+         return data.map((e: any) => ({
+           id: e.id,
+           userId: e.user_id,
+           date: e.date,
+           startTime: e.start_time,
+           lunchStartTime: e.lunch_start_time,
+           lunchEndTime: e.lunch_end_time,
+           dinnerStartTime: e.dinner_start_time,
+           dinnerEndTime: e.dinner_end_time,
+           endTime: e.end_time,
+           description: e.description,
+           totalHours: e.total_hours,
+           regularHours: e.regular_hours,
+           overtimeHours: e.overtime_hours,
+           earnings: e.earnings,
+           isHoliday: e.is_holiday
+         }));
+       }
+
+       if (error && (error.code === 'PGRST205' || error.code === '42P01')) {
+           console.warn('Supabase: Tabela "time_entries" faltando. Fallback LocalStorage.');
+           // Fallback logic continues below
+       } else if (error) {
+           console.error('Supabase Error (getTimeEntries):', JSON.stringify(error, null, 2));
+           return [];
+       }
     }
+
     const allEntries = getSafeArray<TimeEntry>(DB_KEYS.TIME_ENTRIES);
-    // Filter for current user
     const userEntries = allEntries.filter((e: any) => e.userId === userId);
     
     return userEntries.map((e: any) => ({
@@ -133,24 +175,29 @@ export const FinancialRepository = {
   getAllTimeEntries: async (): Promise<TimeEntry[]> => {
     if (isSupabaseConfigured()) {
        const { data, error } = await supabase.from('time_entries').select('*');
-       if (error) return [];
-       return data.map((e: any) => ({
-         id: e.id,
-         userId: e.user_id,
-         date: e.date,
-         startTime: e.start_time,
-         lunchStartTime: e.lunch_start_time,
-         lunchEndTime: e.lunch_end_time,
-         dinnerStartTime: e.dinner_start_time,
-         dinnerEndTime: e.dinner_end_time,
-         endTime: e.end_time,
-         description: e.description,
-         totalHours: e.total_hours,
-         regularHours: e.regular_hours,
-         overtimeHours: e.overtime_hours,
-         earnings: e.earnings,
-         isHoliday: e.is_holiday
-       }));
+       if (!error && data) {
+          return data.map((e: any) => ({
+             id: e.id,
+             userId: e.user_id,
+             date: e.date,
+             startTime: e.start_time,
+             lunchStartTime: e.lunch_start_time,
+             lunchEndTime: e.lunch_end_time,
+             dinnerStartTime: e.dinner_start_time,
+             dinnerEndTime: e.dinner_end_time,
+             endTime: e.end_time,
+             description: e.description,
+             totalHours: e.total_hours,
+             regularHours: e.regular_hours,
+             overtimeHours: e.overtime_hours,
+             earnings: e.earnings,
+             isHoliday: e.is_holiday
+          }));
+       }
+       if (error && (error.code !== 'PGRST205' && error.code !== '42P01')) {
+           return [];
+       }
+       // Fallback for missing table
     }
     const allEntries = getSafeArray<TimeEntry>(DB_KEYS.TIME_ENTRIES);
     return allEntries.map((e: any) => ({
@@ -162,6 +209,7 @@ export const FinancialRepository = {
   },
 
   saveTimeEntries: async (userEntries: TimeEntry[], userId: string): Promise<void> => {
+    let successSupabase = false;
     if (isSupabaseConfigured()) {
        const payload = userEntries.map(e => ({
          id: e.id,
@@ -182,24 +230,33 @@ export const FinancialRepository = {
        }));
        
        if (payload.length > 0) {
-         await supabase.from('time_entries').upsert(payload);
+         const { error } = await supabase.from('time_entries').upsert(payload);
+         if (!error) {
+             successSupabase = true;
+         } else if (error.code !== 'PGRST205' && error.code !== '42P01') {
+             console.error('Supabase Error (saveTimeEntries):', JSON.stringify(error, null, 2));
+         }
+       } else {
+         successSupabase = true; // Nothing to save is a success
        }
-    } else {
-      // LocalStorage: Merge strategy
+    }
+
+    if (!successSupabase) {
       const allEntries = getSafeArray<TimeEntry>(DB_KEYS.TIME_ENTRIES);
-      // Keep entries from OTHER users
       const otherUsersEntries = allEntries.filter(e => e.userId !== userId);
-      // Combine with NEW state for THIS user
       const mergedEntries = [...otherUsersEntries, ...userEntries];
-      
       StorageProvider.set(DB_KEYS.TIME_ENTRIES, mergedEntries);
     }
   },
   
   deleteTimeEntry: async (id: string): Promise<void> => {
+      let successSupabase = false;
       if (isSupabaseConfigured()) {
-          await supabase.from('time_entries').delete().eq('id', id);
-      } else {
+          const { error } = await supabase.from('time_entries').delete().eq('id', id);
+          if (!error) successSupabase = true;
+      }
+      
+      if (!successSupabase) {
           const allEntries = getSafeArray<TimeEntry>(DB_KEYS.TIME_ENTRIES);
           const filtered = allEntries.filter(e => e.id !== id);
           StorageProvider.set(DB_KEYS.TIME_ENTRIES, filtered);
@@ -210,16 +267,22 @@ export const FinancialRepository = {
   getExpenses: async (userId: string): Promise<ExpenseEntry[]> => {
     if (isSupabaseConfigured()) {
        const { data, error } = await supabase.from('expenses').select('*').eq('user_id', userId);
-       if (error) return [];
-       return data.map((e: any) => ({
-          id: e.id,
-          userId: e.user_id,
-          date: e.date,
-          amount: e.amount,
-          category: e.category,
-          description: e.description,
-          agNumber: e.ag_number
-       }));
+       if (!error && data) {
+         return data.map((e: any) => ({
+            id: e.id,
+            userId: e.user_id,
+            date: e.date,
+            amount: e.amount,
+            category: e.category,
+            description: e.description,
+            agNumber: e.ag_number
+         }));
+       }
+       if (error && (error.code === 'PGRST205' || error.code === '42P01')) {
+           console.warn('Supabase: Tabela "expenses" faltando. Fallback LocalStorage.');
+       } else if (error) {
+           return [];
+       }
     }
     const allExpenses = getSafeArray<ExpenseEntry>(DB_KEYS.EXPENSES);
     return allExpenses.filter(e => e.userId === userId);
@@ -228,21 +291,26 @@ export const FinancialRepository = {
   getAllExpenses: async (): Promise<ExpenseEntry[]> => {
     if (isSupabaseConfigured()) {
        const { data, error } = await supabase.from('expenses').select('*');
-       if (error) return [];
-       return data.map((e: any) => ({
-          id: e.id,
-          userId: e.user_id,
-          date: e.date,
-          amount: e.amount,
-          category: e.category,
-          description: e.description,
-          agNumber: e.ag_number
-       }));
+       if (!error && data) {
+          return data.map((e: any) => ({
+              id: e.id,
+              userId: e.user_id,
+              date: e.date,
+              amount: e.amount,
+              category: e.category,
+              description: e.description,
+              agNumber: e.ag_number
+          }));
+       }
+       if (error && error.code !== 'PGRST205' && error.code !== '42P01') {
+          return [];
+       }
     }
     return getSafeArray<ExpenseEntry>(DB_KEYS.EXPENSES);
   },
 
   saveExpenses: async (userExpenses: ExpenseEntry[], userId: string): Promise<void> => {
+    let successSupabase = false;
     if (isSupabaseConfigured()) {
        const payload = userExpenses.map(e => ({
           id: e.id,
@@ -254,9 +322,15 @@ export const FinancialRepository = {
           ag_number: e.agNumber
        }));
        if (payload.length > 0) {
-         await supabase.from('expenses').upsert(payload);
+         const { error } = await supabase.from('expenses').upsert(payload);
+         if (!error) successSupabase = true;
+         else if (error.code !== 'PGRST205' && error.code !== '42P01') console.error('Supabase Error (saveExpenses):', JSON.stringify(error, null, 2));
+       } else {
+         successSupabase = true;
        }
-    } else {
+    }
+    
+    if (!successSupabase) {
       const allExpenses = getSafeArray<ExpenseEntry>(DB_KEYS.EXPENSES);
       const otherUsersExpenses = allExpenses.filter(e => e.userId !== userId);
       StorageProvider.set(DB_KEYS.EXPENSES, [...otherUsersExpenses, ...userExpenses]);
@@ -264,9 +338,13 @@ export const FinancialRepository = {
   },
 
   deleteExpense: async (id: string): Promise<void> => {
+    let successSupabase = false;
     if (isSupabaseConfigured()) {
-        await supabase.from('expenses').delete().eq('id', id);
-    } else {
+        const { error } = await supabase.from('expenses').delete().eq('id', id);
+        if (!error) successSupabase = true;
+    }
+    
+    if (!successSupabase) {
         const allExpenses = getSafeArray<ExpenseEntry>(DB_KEYS.EXPENSES);
         const filtered = allExpenses.filter(e => e.id !== id);
         StorageProvider.set(DB_KEYS.EXPENSES, filtered);
@@ -277,11 +355,17 @@ export const FinancialRepository = {
   getAdvances: async (userId: string): Promise<AdvanceEntry[]> => {
     if (isSupabaseConfigured()) {
         const { data, error } = await supabase.from('advances').select('*').eq('user_id', userId);
-        if (error) return [];
-        return data.map((a: any) => ({
-            ...a,
-            userId: a.user_id
-        }));
+        if (!error && data) {
+            return data.map((a: any) => ({
+                ...a,
+                userId: a.user_id
+            }));
+        }
+        if (error && (error.code === 'PGRST205' || error.code === '42P01')) {
+            console.warn('Supabase: Tabela "advances" faltando. Fallback LocalStorage.');
+        } else if (error) {
+            return [];
+        }
     }
     const allAdvances = getSafeArray<AdvanceEntry>(DB_KEYS.ADVANCES);
     return allAdvances.filter(a => a.userId === userId);
@@ -290,16 +374,21 @@ export const FinancialRepository = {
   getAllAdvances: async (): Promise<AdvanceEntry[]> => {
     if (isSupabaseConfigured()) {
         const { data, error } = await supabase.from('advances').select('*');
-        if (error) return [];
-        return data.map((a: any) => ({
-            ...a,
-            userId: a.user_id
-        }));
+        if (!error && data) {
+            return data.map((a: any) => ({
+                ...a,
+                userId: a.user_id
+            }));
+        }
+        if (error && error.code !== 'PGRST205' && error.code !== '42P01') {
+            return [];
+        }
     }
     return getSafeArray<AdvanceEntry>(DB_KEYS.ADVANCES);
   },
 
   saveAdvances: async (userAdvances: AdvanceEntry[], userId: string): Promise<void> => {
+    let successSupabase = false;
     if (isSupabaseConfigured()) {
         const payload = userAdvances.map(a => ({
             id: a.id,
@@ -309,9 +398,15 @@ export const FinancialRepository = {
             description: a.description
         }));
         if (payload.length > 0) {
-            await supabase.from('advances').upsert(payload);
+            const { error } = await supabase.from('advances').upsert(payload);
+            if (!error) successSupabase = true;
+            else if (error.code !== 'PGRST205' && error.code !== '42P01') console.error('Supabase Error (saveAdvances):', JSON.stringify(error, null, 2));
+        } else {
+            successSupabase = true;
         }
-    } else {
+    }
+    
+    if (!successSupabase) {
         const allAdvances = getSafeArray<AdvanceEntry>(DB_KEYS.ADVANCES);
         const otherUsersAdvances = allAdvances.filter(a => a.userId !== userId);
         StorageProvider.set(DB_KEYS.ADVANCES, [...otherUsersAdvances, ...userAdvances]);
@@ -319,9 +414,13 @@ export const FinancialRepository = {
   },
 
   deleteAdvance: async (id: string): Promise<void> => {
+    let successSupabase = false;
     if (isSupabaseConfigured()) {
-        await supabase.from('advances').delete().eq('id', id);
-    } else {
+        const { error } = await supabase.from('advances').delete().eq('id', id);
+        if (!error) successSupabase = true;
+    }
+    
+    if (!successSupabase) {
         const allAdvances = getSafeArray<AdvanceEntry>(DB_KEYS.ADVANCES);
         const filtered = allAdvances.filter(a => a.id !== id);
         StorageProvider.set(DB_KEYS.ADVANCES, filtered);
